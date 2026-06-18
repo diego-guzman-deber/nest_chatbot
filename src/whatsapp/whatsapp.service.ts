@@ -33,14 +33,36 @@ export class WhatsappService {
   // ── Procesamiento de mensajes entrantes (POST) ───────────────────────────────
 
   async handleIncoming(body: any): Promise<void> {
-    // Ignorar status updates (delivered, read, etc.)
-    const value = body?.entry?.[0]?.changes?.[0]?.value;
-    if (!value?.messages || value?.statuses) {
+    // Log completo del payload para debug
+    this.logger.debug(`Payload recibido: ${JSON.stringify(body).slice(0, 500)}`);
+
+    const entry = body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+
+    if (!value) {
+      this.logger.warn('Payload sin value, ignorando.');
       return;
     }
 
-    const message = value.messages?.[0];
+    // Ignorar status updates (delivered, read, sent, failed, etc.)
+    // ⚠️ FIX: antes era `value?.statuses` que es truthy si el campo existe
+    if (value.statuses && value.statuses.length > 0 && !value.messages) {
+      this.logger.debug(`Status update recibido: ${value.statuses[0]?.status ?? 'desconocido'}`);
+      return;
+    }
+
+    // Verificar que hay mensajes
+    if (!value.messages || value.messages.length === 0) {
+      this.logger.warn(`Sin mensajes en el payload. Campos disponibles: ${Object.keys(value).join(', ')}`);
+      return;
+    }
+
+    const message = value.messages[0];
+
+    // Solo procesar mensajes de texto
     if (!message || message.type !== 'text') {
+      this.logger.log(`Tipo de mensaje ignorado: ${message?.type ?? 'desconocido'}`);
       return;
     }
 
@@ -48,13 +70,19 @@ export class WhatsappService {
     const name: string = value.contacts?.[0]?.profile?.name ?? 'Usuario';
     const messageBody: string = message.text?.body ?? '';
 
-    if (!messageBody) return;
+    if (!messageBody) {
+      this.logger.warn(`[${waId}] Mensaje de texto vacío, ignorando.`);
+      return;
+    }
 
     this.logger.log(`[${waId}] Mensaje de ${name}: ${messageBody.slice(0, 80)}`);
 
     // Generar respuesta con OpenAI
     const reply = await this.openaiService.generateResponse(messageBody, waId, name);
-    if (!reply) return;
+    if (!reply) {
+      this.logger.warn(`[${waId}] OpenAI no devolvió respuesta.`);
+      return;
+    }
 
     // Limpiar el texto para WhatsApp
     const cleaned = this.processTextForWhatsapp(reply);
@@ -80,6 +108,10 @@ export class WhatsappService {
     const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
     const accessToken = this.config.get<string>('ACCESS_TOKEN');
 
+    // Log de configuración para verificar que las env vars están cargadas
+    this.logger.log(`Usando PHONE_NUMBER_ID: ${phoneNumberId ?? '⚠️ NO DEFINIDO'}`);
+    this.logger.log(`ACCESS_TOKEN presente: ${accessToken ? '✅ Sí' : '⚠️ NO'}`);
+
     const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 
     const data = {
@@ -100,10 +132,11 @@ export class WhatsappService {
           'Content-Type': 'application/json',
         },
       });
-      this.logger.log(`[${waId}] Mensaje enviado. Status: ${res.status}`);
+      this.logger.log(`[${waId}] ✅ Mensaje enviado. Status: ${res.status}`);
     } catch (error: any) {
       const detail = error?.response?.data ?? error?.message;
-      this.logger.error(`[${waId}] Error al enviar mensaje: ${JSON.stringify(detail)}`);
+      this.logger.error(`[${waId}] ❌ Error al enviar mensaje: ${JSON.stringify(detail)}`);
+      this.logger.error(`URL usada: ${url}`);
     }
   }
 }
