@@ -12,6 +12,8 @@ export class SignatureGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const signatureHeader: string = req.headers['x-hub-signature-256'] ?? '';
 
+    this.logger.log(`📥 Petición POST recibida en /webhook. Firma header: ${signatureHeader || 'Ninguna'}`);
+
     // Remover prefijo 'sha256='
     const signature = signatureHeader.startsWith('sha256=')
       ? signatureHeader.slice(7)
