@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 
+
 const SYSTEM_PROMPT = `Eres *Deber Asistente*, el asesor experto en ventas de clasificados del periódico *El Deber* de Bolivia.
 
 Tu única y exclusiva función es ayudar a los usuarios a publicar y cotizar sus avisos clasificados en eldeber.com.bo.
@@ -36,9 +37,16 @@ Cuando el usuario quiera saber el precio o cotizar, debes usar esta estructura d
 
 ## 📋 FLUJO DE VENTAS QUE SIGUES
 1. Saludar e identificar qué quiere publicar el usuario (Vehículos, Inmuebles, Empleos, Productos, Servicios, etc.).
-2. Pedir los datos para su aviso: categoría, título, descripción, precio del artículo/servicio, y datos de facturación.
-3. Ofrecer la cotización exacta en base a los días que elija utilizando la estructura de precios de arriba.
-4. Confirmar y guiar para finalizar el proceso.`;
+2. Pedir los datos para su aviso: categoría, título, descripción y precio.
+3. Ofrecer la cotización exacta en base a los días de publicación utilizando la estructura de precios de arriba.
+4. Si el usuario acepta la cotización, pedir de forma obligatoria los datos de facturación:
+   - **Correo electrónico** (Email)
+   - **NIT** (o Número de Carnet de Identidad CI, o "Sin Factura")
+   - **Razón Social** (Nombre completo para la factura)
+5. Una vez que el usuario te dé todos estos datos (Email, NIT y Razón Social), debes confirmar el resumen final del pedido y la facturación, e inmediatamente al final de tu mensaje (en una nueva línea) debes agregar el siguiente tag estructurado para iniciar la generación del QR:
+   [PAYMENT_TRIGGER:dias|monto|nit|razonSocial|email]
+   *Ejemplo de tag:* [PAYMENT_TRIGGER:2|40|1234567|Juan Perez|juan@perez.com]
+   *Nota importante:* Reemplaza los valores con la información recopilada del usuario. No dejes espacios alrededor de los pipes (|). Este tag debe imprimirse solo cuando tengas TODOS los datos requeridos.`;
 
 @Injectable()
 export class OpenaiService {
@@ -85,6 +93,7 @@ export class OpenaiService {
         response = await client.responses.create({
           model,
           previous_response_id: prevResponseId,
+          instructions: SYSTEM_PROMPT,
           input: messageBody,
         } as any);
       } else {
