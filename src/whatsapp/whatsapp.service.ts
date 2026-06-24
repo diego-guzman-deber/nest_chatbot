@@ -103,15 +103,15 @@ export class WhatsappService {
 
     // Si se detectó el trigger de pago, iniciar el proceso de cobro
     if (match) {
-      const triggerData = match[1]; // dias|monto|nit|razonSocial|email
-      const [dias, montoStr, nit, razonSocial, email] = triggerData.split('|');
+      const triggerData = match[1]; // plan|monto|nit|razonSocial|email
+      const [plan, montoStr, nit, razonSocial, email] = triggerData.split('|');
       const monto = parseFloat(montoStr) || 0;
 
-      // Generar un ID único de aviso (adId)
-      const adId = `cln-${Math.floor(100000 + Math.random() * 900000)}`;
+      // Generar un ID único de suscripción (adId)
+      const adId = `sub-${Math.floor(100000 + Math.random() * 900000)}`;
 
       this.logger.log(
-        `[${waId}] 💳 Trigger de Pago QR detectado. Aviso: ${adId}, Días: ${dias}, Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
+        `[${waId}] 💳 Trigger de Pago QR detectado. Suscripción: ${adId}, Plan: ${plan}, Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
       );
 
       this.procesarYEnviarPagoQR(waId, monto, adId, razonSocial, nit).catch((err) => {
@@ -137,7 +137,7 @@ export class WhatsappService {
       const mediaId = await this.uploadMedia(qrBuffer, 'qr_pago.png', 'image/png');
 
       // 3. Enviar el QR por WhatsApp
-      const caption = 'Aquí tienes tu código QR para realizar el pago. Una vez pagado, tu aviso se activará automáticamente.';
+      const caption = 'Aquí tienes tu código QR para realizar el pago de tu suscripción. Una vez pagado, se activará automáticamente.';
       await this.sendMediaMessage(waId, mediaId, caption);
 
       // 4. Iniciar el monitoreo en segundo plano
@@ -215,7 +215,7 @@ export class WhatsappService {
     let intentos = 0;
     const maxIntentos = 30; // 30 intentos cada 30 segundos = 15 minutos
 
-    this.logger.log(`[${waId}] Iniciando monitoreo de pago para el aviso ${adId}.`);
+    this.logger.log(`[${waId}] Iniciando monitoreo de pago para la suscripción ${adId}.`);
 
     const interval = setInterval(async () => {
       intentos++;
@@ -225,23 +225,23 @@ export class WhatsappService {
 
         if (pagado) {
           clearInterval(interval);
-          this.logger.log(`[${waId}] ¡Pago confirmado para el aviso ${adId}!`);
+          this.logger.log(`[${waId}] ¡Pago confirmado para la suscripción ${adId}!`);
           await this.sendMessage(
             waId,
-            '¡Excelente! Hemos verificado tu pago por QR de forma exitosa. Tu aviso ya se encuentra publicado en eldeber.com.bo. ¡Muchas gracias por confiar en nosotros! 🚀😊',
+            '¡Excelente! Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
           );
           return;
         }
       } catch (error: any) {
-        this.logger.error(`[${waId}] Error consultando el pago para aviso ${adId}: ${error.message}`);
+        this.logger.error(`[${waId}] Error consultando el pago para suscripción ${adId}: ${error.message}`);
       }
 
       if (intentos >= maxIntentos) {
         clearInterval(interval);
-        this.logger.warn(`[${waId}] Monitoreo de pago expirado para el aviso ${adId}.`);
+        this.logger.warn(`[${waId}] Monitoreo de pago expirado para la suscripción ${adId}.`);
         await this.sendMessage(
           waId,
-          'El tiempo límite (15 minutos) para realizar el pago de tu código QR ha expirado. Si aún deseas publicar tu aviso, por favor solicítame uno nuevo.',
+          'El tiempo límite (15 minutos) para realizar el pago de tu código QR ha expirado. Si aún deseas adquirir la suscripción, por favor solicítame una nueva cotización.',
         );
       }
     }, 30000); // Consultar cada 30 segundos
