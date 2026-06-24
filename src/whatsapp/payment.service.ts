@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { PlanesService } from '../planes/planes.service';
 
+// ── Constantes de la API real de El Deber (obtenidas del proyecto paywall) ───
+const ELDEBER_ADMIN_API = 'https://admin.eldeber.bo/api/v1';
+const ELDEBER_ADMIN_KEY = 'd24dbceeb3a8b998baee4f821b7f14d1';
+
 // Plan de prueba de 1 Bs: vive solo aquí y en el prompt, no en MongoDB
-const PLAN_PRUEBA = { itemId: 'TEST01', monto: 1 };
+const PLAN_PRUEBA = { itemId: 'ChatbotSus', monto: 1 };
 
 @Injectable()
 export class PaymentService {
@@ -23,7 +27,7 @@ export class PaymentService {
     const normalized = planNombre.toLowerCase().trim();
 
     // Verificar si es el plan de prueba (no está en MongoDB)
-    if (normalized.includes('prueba') || normalized === 'test01') {
+    if (normalized.includes('prueba') || normalized === 'chatbotsus') {
       this.logger.log(`Plan de prueba detectado: "${planNombre}" → itemId=${PLAN_PRUEBA.itemId}`);
       return PLAN_PRUEBA;
     }
@@ -40,13 +44,17 @@ export class PaymentService {
   }
 
   /**
-   * Genera el orderId para suscripciones en el formato: sus-{userId}-{YYYYMM}
-   * El userId en este contexto es el waId del usuario de WhatsApp.
+   * Genera el orderId para suscripciones originadas desde el chatbot de WhatsApp.
+   * Formato: wa-{waId}-{YYYYMM}
+   *   - Prefijo "wa-" identifica en la DB de El Deber que el pago vino del chatbot de WhatsApp.
+   *   - {waId} = número de WhatsApp del usuario (ej: 59164442738).
+   *   - {YYYYMM} = año y mes de la suscripción (ej: 202406).
+   * Ejemplo resultado: wa-59164442738-202406
    */
   generarOrderId(waId: string): string {
     const now = new Date();
     const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return `sus-${waId}-${yyyymm}`;
+    return `wa-${waId}-${yyyymm}`;
   }
 
   /**
@@ -91,26 +99,51 @@ export class PaymentService {
 
   /**
    * Consulta el estado del pago de una suscripción en la API de El Deber.
+   * Usa el endpoint real: GET /Contact?whereGroup[0][attribute]=cIdpaywall&whereGroup[0][value]={orderId}
+   * con la API key del proyecto paywall.
    */
   async consultarEstadoPago(orderId: string): Promise<boolean> {
-    const apiKey  = this.config.get<string>('ELDEBER_API_KEY') ?? '';
-    const baseUrl = this.config.get<string>('CLB_API_URL') ?? 'https://clb.eldeber.com.bo/api/v1';
-    const url     = `${baseUrl}/CSuscripcion/${orderId}`;
+    const baseUrl = this.config.get<string>('ELDEBER_ADMIN_API') ?? ELDEBER_ADMIN_API;
+    const apiKey  = this.config.get<string>('ELDEBER_ADMIN_KEY') ?? ELDEBER_ADMIN_KEY;
+
+    // Buscar el contacto cuyo cIdpaywall coincida con el orderId de la suscripción
+    const url = `${baseUrl}/Contact`;
 
     try {
       const response = await axios.get(url, {
         headers: { 'x-api-key': apiKey },
+        params: {
+          maxSize: 1,
+          offset: 0,
+          'whereGroup[0][type]': 'equals',
+          'whereGroup[0][attribute]': 'cIdpaywall',
+          'whereGroup[0][value]': orderId,
+          attributeSelect: 'id,name,cSubscribed,cIdpaywall',
+        },
       });
 
-      if (response.data && response.data.pagado === true) {
-        this.logger.log(`Suscripción ${orderId} verificada como PAGADA.`);
-        return true;
+      const data = response.data;
+
+      // Si encontró al menos un contacto con ese orderId y tiene suscripción activa
+      if (data && data.total > 0 && data.list && data.list.length > 0) {
+        const contacto = data.list[0];
+        if (contacto.cSubscribed === true || contacto.cSubscribed === 1 || contacto.cSubscribed === '1') {
+          this.logger.log(`Suscripción ${orderId} verificada como PAGADA. Contacto: ${contacto.name}`);
+          return true;
+        }
       }
 
-      this.logger.debug(`Suscripción ${orderId} aún no ha sido pagada.`);
+      this.logger.debug(`Suscripción ${orderId} aún no está activa en El Deber.`);
       return false;
-    } catch (error: any) {
-      this.logger.error(`Error al consultar estado de suscripción ${orderId}: ${error.message}`);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError;
+      const status = axiosError?.response?.status;
+      // 404 = todavía no registrado (normal), 401 = credenciales (reportar una sola vez)
+      if (status === 404) {
+        this.logger.debug(`Suscripción ${orderId} aún no registrada en El Deber (404).`);
+      } else {
+        this.logger.warn(`Error al consultar estado de suscripción ${orderId}: ${axiosError.message} (HTTP ${status ?? 'desconocido'})`);
+      }
       return false;
     }
   }
