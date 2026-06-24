@@ -128,11 +128,26 @@ export class PaymentService {
         return contactId;
       }
 
-      this.logger.log(`Contacto no encontrado. Creando contacto en EspoCRM para: ${cleanEmail}`);
+      // Dividir el nombre completo/razón social en firstName y lastName (requerido por EspoCRM)
+      let firstName = 'Usuario';
+      let lastName = 'Chatbot';
+      const nameParts = (razonSocial || '').trim().split(/\s+/);
+      if (nameParts.length > 0 && nameParts[0]) {
+        firstName = nameParts[0];
+        if (nameParts.length > 1) {
+          lastName = nameParts.slice(1).join(' ');
+        } else {
+          lastName = 'Chatbot';
+        }
+      }
+
+      this.logger.log(`Contacto no encontrado. Creando contacto en EspoCRM para: ${cleanEmail} (firstName: ${firstName}, lastName: ${lastName})`);
       const createRes = await axios.post(
         url,
         {
           name: razonSocial || 'Usuario Chatbot',
+          firstName: firstName,
+          lastName: lastName,
           emailAddress: cleanEmail,
           emailAddressData: [
             {
