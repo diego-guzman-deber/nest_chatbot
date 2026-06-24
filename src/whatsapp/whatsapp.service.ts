@@ -105,16 +105,20 @@ export class WhatsappService {
     if (match) {
       const triggerData = match[1]; // plan|monto|nit|razonSocial|email
       const [plan, montoStr, nit, razonSocial, email] = triggerData.split('|');
-      const monto = parseFloat(montoStr) || 0;
 
-      // Generar un ID único de suscripción (adId)
-      const adId = `sub-${Math.floor(100000 + Math.random() * 900000)}`;
+      // Resolver el itemId y monto exacto desde el nombre del plan
+      const planResuelto = this.paymentService.resolverPlan(plan);
+      const monto = planResuelto?.amount ?? (parseFloat(montoStr) || 0);
+      const itemId = planResuelto?.itemId ?? 'DESCONOCIDO';
+
+      // Generar el orderId de suscripción: sus-{waId}-{YYYYMM}
+      const orderId = this.paymentService.generarOrderId(waId);
 
       this.logger.log(
-        `[${waId}] 💳 Trigger de Pago QR detectado. Suscripción: ${adId}, Plan: ${plan}, Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
+        `[${waId}] 💳 Trigger de Pago QR detectado. Order: ${orderId}, Plan: ${plan} (${itemId}), Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
       );
 
-      this.procesarYEnviarPagoQR(waId, monto, adId, razonSocial, nit).catch((err) => {
+      this.procesarYEnviarPagoQR(waId, monto, orderId, razonSocial, nit, itemId).catch((err) => {
         this.logger.error(`[${waId}] Error en el procesamiento del pago QR: ${err.message}`, err.stack);
       });
     }
@@ -125,13 +129,14 @@ export class WhatsappService {
   private async procesarYEnviarPagoQR(
     waId: string,
     monto: number,
-    adId: string,
+    orderId: string,
     razonSocial: string,
     nit: string,
+    itemId: string,
   ): Promise<void> {
     try {
-      // 1. Obtener el QR en formato binario
-      const qrBuffer = await this.paymentService.obtenerQrBuffer(monto, adId, razonSocial, nit);
+      // 1. Obtener el QR en formato binario con los parámetros correctos de suscripciones
+      const qrBuffer = await this.paymentService.obtenerQrBuffer(monto, orderId, razonSocial, nit, itemId);
 
       // 2. Subir el QR a Meta para obtener el media_id
       const mediaId = await this.uploadMedia(qrBuffer, 'qr_pago.png', 'image/png');
@@ -141,7 +146,7 @@ export class WhatsappService {
       await this.sendMediaMessage(waId, mediaId, caption);
 
       // 4. Iniciar el monitoreo en segundo plano
-      this.iniciarMonitoreoPago(adId, waId);
+      this.iniciarMonitoreoPago(orderId, waId);
     } catch (error: any) {
       this.logger.error(`[${waId}] Error generando o enviando el QR de pago: ${error.message}`);
       await this.sendMessage(
