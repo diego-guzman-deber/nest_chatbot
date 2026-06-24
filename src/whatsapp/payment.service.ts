@@ -1,62 +1,42 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { PlanesService } from '../planes/planes.service';
 
-// ── Mapeo de nombres de planes hacia los itemId usados por la API de suscripciones ──
-// Basado en el proyecto paywall: sistema=suscripcion, tipo=itemId
-const PLAN_ITEM_MAP: Record<string, { itemId: string; amount: number }> = {
-  // Solo Newsletter
-  'solo newsletter mensual':       { itemId: 'NL01',      amount: 19.90 },
-  'solo newsletter trimestral':    { itemId: 'NL03',      amount: 108   },
-  'solo newsletter anual':         { itemId: 'NL12',      amount: 192   },
-
-  // Epaper + Newsletter
-  'epaper newsletter mensual':     { itemId: 'epaper01',  amount: 100   },
-  'epaper newsletter trimestral':  { itemId: 'EP03',      amount: 200   },
-  'epaper newsletter anual':       { itemId: 'epaper12',  amount: 700   },
-
-  // Combos digitales
-  'combo epaper 3 cuentas anual':  { itemId: 'EP3C12',    amount: 1100  },
-  'plan corporativo 10 cuentas':   { itemId: 'EPCORP12',  amount: 2000  },
-
-  // Impreso + Epaper + Newsletter
-  'impreso epaper mensual':        { itemId: 'Impreso1DV', amount: 240  },
-  'impreso epaper trimestral':     { itemId: 'IMP03',      amount: 700  },
-  'impreso epaper semestral':      { itemId: 'IMP06',      amount: 1365 },
-
-  // Anuales impreso + epaper
-  'impreso domingo viernes anual': { itemId: 'Impreso1ADV', amount: 2700 },
-  'impreso lunes viernes anual':   { itemId: 'ImpLV12',     amount: 2300 },
-
-  // Solo domingo impreso
-  'impreso domingo semestral':     { itemId: 'ImpDom06',   amount: 230  },
-  'impreso domingo anual':         { itemId: 'ImpDom12',   amount: 440  },
-
-  // Plan de prueba
-  'prueba':                        { itemId: 'TEST01',     amount: 1    },
-};
+// Plan de prueba de 1 Bs: vive solo aquí y en el prompt, no en MongoDB
+const PLAN_PRUEBA = { itemId: 'TEST01', monto: 1 };
 
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly planesService: PlanesService,
+  ) {}
 
   /**
    * Obtiene el itemId y monto para un plan dado.
-   * Hace una búsqueda flexible por nombre en minúsculas.
+   * Consulta MongoDB primero; si no encuentra el plan, verifica si es el plan de prueba.
    */
-  resolverPlan(planNombre: string): { itemId: string; amount: number } | null {
-    const key = planNombre.toLowerCase().trim();
+  async resolverPlan(planNombre: string): Promise<{ itemId: string; monto: number } | null> {
+    const normalized = planNombre.toLowerCase().trim();
 
-    // Búsqueda exacta primero
-    if (PLAN_ITEM_MAP[key]) return PLAN_ITEM_MAP[key];
+    // Verificar si es el plan de prueba (no está en MongoDB)
+    if (normalized.includes('prueba') || normalized === 'test01') {
+      this.logger.log(`Plan de prueba detectado: "${planNombre}" → itemId=${PLAN_PRUEBA.itemId}`);
+      return PLAN_PRUEBA;
+    }
 
-    // Búsqueda parcial (contiene alguna palabra clave del plan)
-    const match = Object.keys(PLAN_ITEM_MAP).find(
-      (k) => key.includes(k) || k.includes(key),
-    );
-    return match ? PLAN_ITEM_MAP[match] : null;
+    // Buscar en MongoDB
+    const resultado = await this.planesService.resolverPlan(planNombre);
+    if (resultado) {
+      this.logger.log(`Plan resuelto desde MongoDB: "${planNombre}" → itemId=${resultado.itemId}, monto=${resultado.monto} Bs`);
+      return resultado;
+    }
+
+    this.logger.warn(`Plan no encontrado ni en MongoDB ni como plan de prueba: "${planNombre}"`);
+    return null;
   }
 
   /**
@@ -82,7 +62,7 @@ export class PaymentService {
     itemId: string,
   ): Promise<Buffer> {
     const baseUrl = this.config.get<string>('QR_API_URL') ?? 'https://apipos.eldeber.com.bo/qrpayment';
-    const sistema = this.config.get<string>('QR_SISTEMA')  ?? 'suscripcion';
+    const sistema = this.config.get<string>('QR_SISTEMA') ?? 'suscripcion';
 
     const descripcion = `${razonSocial}|${nit}`;
 
@@ -113,8 +93,8 @@ export class PaymentService {
    * Consulta el estado del pago de una suscripción en la API de El Deber.
    */
   async consultarEstadoPago(orderId: string): Promise<boolean> {
-    const apiKey  = this.config.get<string>('ELDEBER_API_KEY')  ?? '';
-    const baseUrl = this.config.get<string>('CLB_API_URL')      ?? 'https://clb.eldeber.com.bo/api/v1';
+    const apiKey  = this.config.get<string>('ELDEBER_API_KEY') ?? '';
+    const baseUrl = this.config.get<string>('CLB_API_URL') ?? 'https://clb.eldeber.com.bo/api/v1';
     const url     = `${baseUrl}/CSuscripcion/${orderId}`;
 
     try {

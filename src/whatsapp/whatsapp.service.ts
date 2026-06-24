@@ -106,9 +106,9 @@ export class WhatsappService {
       const triggerData = match[1]; // plan|monto|nit|razonSocial|email
       const [plan, montoStr, nit, razonSocial, email] = triggerData.split('|');
 
-      // Resolver el itemId y monto exacto desde el nombre del plan
-      const planResuelto = this.paymentService.resolverPlan(plan);
-      const monto = planResuelto?.amount ?? (parseFloat(montoStr) || 0);
+      // Resolver el itemId y monto exacto desde el nombre del plan (consulta MongoDB, es async)
+      const planResuelto = await this.paymentService.resolverPlan(plan);
+      const monto = planResuelto?.monto ?? (parseFloat(montoStr) || 0);
       const itemId = planResuelto?.itemId ?? 'DESCONOCIDO';
 
       // Generar el orderId de suscripción: sus-{waId}-{YYYYMM}
