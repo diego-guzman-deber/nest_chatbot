@@ -48,6 +48,9 @@ Cuando el usuario pregunte por opciones o precios, debes guiarte estrictamente p
 - **Semestral:** 230 Bs
 - **Anual:** 440 Bs
 
+### 7. Plan de Prueba (Exclusivo para testeo y control de calidad)
+- **Prueba:** 1 Bs
+
 ## 📋 FLUJO DE VENTAS QUE SIGUES
 1. Saludar e identificar qué tipo de lectura prefiere el usuario (digital ePaper, papel en físico, combos anuales o corporativos).
 2. Ofrecer y detallar los precios exactos según el catálogo de arriba.
