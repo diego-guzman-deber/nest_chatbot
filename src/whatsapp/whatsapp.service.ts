@@ -111,14 +111,23 @@ export class WhatsappService {
       const monto = planResuelto?.monto ?? (parseFloat(montoStr) || 0);
       const itemId = planResuelto?.itemId ?? 'DESCONOCIDO';
 
-      // Generar el orderId de suscripción: sus-{waId}-{YYYYMM}
-      const orderId = this.paymentService.generarOrderId(waId);
+      // 1. Obtener o crear el contacto en EspoCRM para obtener el contactId correcto
+      let contactId = waId;
+      try {
+        contactId = await this.paymentService.obtenerOCrearContacto(email, razonSocial);
+      } catch (err: any) {
+        this.logger.warn(`[${waId}] No se pudo obtener o crear el contacto en EspoCRM para ${email}: ${err.message}. Se usará waId como fallback.`);
+      }
+
+      // 2. Generar el orderId de suscripción: wa-{contactId}-{YYYYMM}
+      const orderId = this.paymentService.generarOrderId(contactId);
 
       this.logger.log(
         `[${waId}] 💳 Trigger de Pago QR detectado. Order: ${orderId}, Plan: ${plan} (${itemId}), Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
       );
 
-      this.procesarYEnviarPagoQR(waId, monto, orderId, razonSocial, nit, itemId).catch((err) => {
+      // Pasar el email para que el polling pueda verificar por emailAddress en El Deber
+      this.procesarYEnviarPagoQR(waId, monto, orderId, razonSocial, nit, itemId, email).catch((err) => {
         this.logger.error(`[${waId}] Error en el procesamiento del pago QR: ${err.message}`, err.stack);
       });
     }
@@ -133,6 +142,7 @@ export class WhatsappService {
     razonSocial: string,
     nit: string,
     itemId: string,
+    email: string,
   ): Promise<void> {
     try {
       // 1. Obtener el QR en formato binario con los parámetros correctos de suscripciones
@@ -145,8 +155,8 @@ export class WhatsappService {
       const caption = 'Aquí tienes tu código QR para realizar el pago de tu suscripción. Una vez pagado, se activará automáticamente.';
       await this.sendMediaMessage(waId, mediaId, caption);
 
-      // 4. Iniciar el monitoreo en segundo plano
-      this.iniciarMonitoreoPago(orderId, waId);
+      // 4. Iniciar el monitoreo en segundo plano (pasa el email para buscar por emailAddress)
+      this.iniciarMonitoreoPago(orderId, waId, email);
     } catch (error: any) {
       this.logger.error(`[${waId}] Error generando o enviando el QR de pago: ${error.message}`);
       await this.sendMessage(
@@ -214,42 +224,43 @@ export class WhatsappService {
     this.logger.log(`[${waId}] QR enviado con éxito a WhatsApp.`);
   }
 
-  // ── Monitorear Estado de Pago (Polling) ─────────────────────────────────────
+  // ── Monitorear Estado de Pago (Polling por email) ───────────────────────────
 
-  private iniciarMonitoreoPago(adId: string, waId: string): void {
+  private iniciarMonitoreoPago(orderId: string, waId: string, email: string): void {
     let intentos = 0;
-    const maxIntentos = 30; // 30 intentos cada 30 segundos = 15 minutos
+    const maxIntentos = 30; // 30 intentos × 30 segundos = 15 minutos
 
-    this.logger.log(`[${waId}] Iniciando monitoreo de pago para la suscripción ${adId}.`);
+    this.logger.log(`[${waId}] Iniciando monitoreo de pago. Order: ${orderId}, Email: ${email}`);
 
     const interval = setInterval(async () => {
       intentos++;
 
       try {
-        const pagado = await this.paymentService.consultarEstadoPago(adId);
+        // Busca por email del usuario en la API de El Deber (igual que cybersource-callback.php)
+        const pagado = await this.paymentService.consultarEstadoPago(orderId, email);
 
         if (pagado) {
           clearInterval(interval);
-          this.logger.log(`[${waId}] ¡Pago confirmado para la suscripción ${adId}!`);
+          this.logger.log(`[${waId}] ✅ Pago confirmado para la suscripción ${orderId}!`);
           await this.sendMessage(
             waId,
-            '¡Excelente! Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
+            '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
           );
           return;
         }
       } catch (error: any) {
-        this.logger.error(`[${waId}] Error consultando el pago para suscripción ${adId}: ${error.message}`);
+        this.logger.error(`[${waId}] Error consultando el pago para suscripción ${orderId}: ${error.message}`);
       }
 
       if (intentos >= maxIntentos) {
         clearInterval(interval);
-        this.logger.warn(`[${waId}] Monitoreo de pago expirado para la suscripción ${adId}.`);
+        this.logger.warn(`[${waId}] Monitoreo expirado para la suscripción ${orderId}.`);
         await this.sendMessage(
           waId,
           'El tiempo límite (15 minutos) para realizar el pago de tu código QR ha expirado. Si aún deseas adquirir la suscripción, por favor solicítame una nueva cotización.',
         );
       }
-    }, 30000); // Consultar cada 30 segundos
+    }, 30000);
   }
 
   // ── Limpiar texto para WhatsApp ──────────────────────────────────────────────
