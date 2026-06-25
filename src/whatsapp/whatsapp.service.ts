@@ -63,22 +63,33 @@ export class WhatsappService {
 
     const message = value.messages[0];
 
-    // Solo procesar mensajes de texto
-    if (!message || message.type !== 'text') {
+    // Solo procesar mensajes de texto o interactivos (respuestas a botones/menús)
+    if (!message || (message.type !== 'text' && message.type !== 'interactive')) {
       this.logger.log(`Tipo de mensaje ignorado: ${message?.type ?? 'desconocido'}`);
       return;
     }
 
     const waId: string = value.contacts?.[0]?.wa_id ?? message.from;
     const name: string = value.contacts?.[0]?.profile?.name ?? 'Usuario';
-    const messageBody: string = message.text?.body ?? '';
+    
+    let messageBody = '';
+    if (message.type === 'text') {
+      messageBody = message.text?.body ?? '';
+    } else if (message.type === 'interactive') {
+      const interactive = message.interactive;
+      if (interactive?.type === 'list_reply') {
+        messageBody = interactive.list_reply?.title ?? '';
+      } else if (interactive?.type === 'button_reply') {
+        messageBody = interactive.button_reply?.title ?? '';
+      }
+    }
 
     if (!messageBody) {
-      this.logger.warn(`[${waId}] Mensaje de texto vacío, ignorando.`);
+      this.logger.warn(`[${waId}] Mensaje vacío (tipo: ${message.type}), ignorando.`);
       return;
     }
 
-    this.logger.log(`[${waId}] Mensaje de ${name}: ${messageBody.slice(0, 80)}`);
+    this.logger.log(`[${waId}] Mensaje de ${name} (tipo: ${message.type}): ${messageBody.slice(0, 80)}`);
 
     // Generar respuesta con OpenAI
     const reply = await this.openaiService.generateResponse(messageBody, waId, name);
@@ -97,11 +108,25 @@ export class WhatsappService {
       cleanedReply = reply.replace(triggerRegex, '').trim();
     }
 
+    // Detectar si la respuesta contiene el MENU_TRIGGER
+    const menuRegex = /\[MENU_TRIGGER\]/;
+    const hasMenuTrigger = menuRegex.test(cleanedReply);
+    if (hasMenuTrigger) {
+      cleanedReply = cleanedReply.replace(menuRegex, '').trim();
+    }
+
     // Limpiar el texto para WhatsApp
     const cleaned = this.processTextForWhatsapp(cleanedReply);
 
     // Enviar la respuesta de texto al usuario
-    await this.sendMessage(waId, cleaned);
+    if (hasMenuTrigger) {
+      if (cleaned) {
+        await this.sendMessage(waId, cleaned);
+      }
+      await this.sendInteractiveListMenu(waId, 'Por favor, selecciona una de las siguientes opciones para continuar:');
+    } else {
+      await this.sendMessage(waId, cleaned);
+    }
 
     // Si se detectó el trigger de pago, iniciar el proceso de cobro
     if (match) {
@@ -351,6 +376,83 @@ export class WhatsappService {
       const detail = error?.response?.data ?? error?.message;
       this.logger.error(`[${waId}] ❌ Error al enviar mensaje: ${JSON.stringify(detail)}`);
       this.logger.error(`URL usada: ${url}`);
+    }
+  }
+
+  // ── Enviar Menú Interactivo (List Reply) a Meta ──────────────────────────────
+  private async sendInteractiveListMenu(waId: string, bodyText: string): Promise<void> {
+    const version = this.config.get<string>('VERSION') ?? 'v25.0';
+    const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
+    const accessToken = this.config.get<string>('ACCESS_TOKEN');
+
+    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+
+    const data = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: waId,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        header: {
+          type: 'text',
+          text: 'Menú de opciones',
+        },
+        body: {
+          text: bodyText,
+        },
+        footer: {
+          text: 'El Deber',
+        },
+        action: {
+          button: 'Ver opciones',
+          sections: [
+            {
+              title: '¿En qué puedo ayudarte?',
+              rows: [
+                {
+                  id: 'menu_ver_planes',
+                  title: 'Ver planes',
+                  description: 'Quiero conocer los planes disponibles',
+                },
+                {
+                  id: 'menu_ya_soy_cliente',
+                  title: 'Ya soy cliente',
+                  description: 'Gestionar mi cuenta o ver mi suscripción',
+                },
+                {
+                  id: 'menu_renovar_plan',
+                  title: 'Renovar mi plan',
+                  description: 'Quiero renovar mi suscripción',
+                },
+                {
+                  id: 'menu_preguntas_frecuentes',
+                  title: 'Preguntas frecuentes',
+                  description: 'Tengo dudas sobre los planes o el servicio',
+                },
+                {
+                  id: 'menu_hablar_asesor',
+                  title: 'Hablar con asesor',
+                  description: 'Quiero hablar con un asesor humano',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    try {
+      const res = await axios.post(url, data, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      this.logger.log(`[${waId}] ✅ Menú interactivo enviado. Status: ${res.status}`);
+    } catch (error: any) {
+      const detail = error?.response?.data ?? error?.message;
+      this.logger.error(`[${waId}] ❌ Error al enviar menú interactivo: ${JSON.stringify(detail)}`);
     }
   }
 }
