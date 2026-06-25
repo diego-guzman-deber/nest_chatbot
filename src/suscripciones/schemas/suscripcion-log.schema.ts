@@ -52,8 +52,10 @@ export class SuscripcionLog {
   /**
    * Fecha de fin calculada según la frecuencia del plan.
    * Si no se conoce la frecuencia, se deja como null.
+   * Se declara como type: Date explícito porque reflect-metadata
+   * no puede inferir el tipo cuando es una unión (Date | null).
    */
-  @Prop({ default: null })
+  @Prop({ type: Date, default: null })
   fechaFin: Date | null;
 
   /** Si la suscripción sigue activa (flag para renovación / recordatorios) */
