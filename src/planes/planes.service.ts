@@ -178,7 +178,7 @@ export class PlanesService implements OnModuleInit {
   }
 
   // ── Resolver plan por nombre (búsqueda flexible) ─────────────────────────
-  async resolverPlan(nombre: string): Promise<{ itemId: string; monto: number } | null> {
+  async resolverPlan(nombre: string): Promise<{ itemId: string; monto: number; frecuencia?: string } | null> {
     const normalized = nombre.toLowerCase().trim();
 
     // 1. Búsqueda exacta por itemId
@@ -186,14 +186,14 @@ export class PlanesService implements OnModuleInit {
       activo: true,
       itemId: { $regex: new RegExp(`^${normalized}$`, 'i') },
     });
-    if (plan) return { itemId: plan.itemId, monto: plan.monto };
+    if (plan) return { itemId: plan.itemId, monto: plan.monto, frecuencia: plan.frecuencia };
 
     // 2. Búsqueda por nombre exacto (insensible a mayúsculas)
     plan = await this.planModel.findOne({
       activo: true,
       nombre: { $regex: new RegExp(normalized, 'i') },
     });
-    if (plan) return { itemId: plan.itemId, monto: plan.monto };
+    if (plan) return { itemId: plan.itemId, monto: plan.monto, frecuencia: plan.frecuencia };
 
     // 3. Búsqueda por palabras clave (cada palabra del nombre buscado debe estar en el nombre del plan)
     const palabras = normalized.split(/\s+/).filter((p) => p.length > 2);
@@ -203,7 +203,7 @@ export class PlanesService implements OnModuleInit {
         activo: true,
         $and: regexes.map((r) => ({ nombre: r })),
       });
-      if (plan) return { itemId: plan.itemId, monto: plan.monto };
+      if (plan) return { itemId: plan.itemId, monto: plan.monto, frecuencia: plan.frecuencia };
     }
 
     this.logger.warn(`No se encontró plan en MongoDB para: "${nombre}"`);

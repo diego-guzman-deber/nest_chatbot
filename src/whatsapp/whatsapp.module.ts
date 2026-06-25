@@ -5,10 +5,12 @@ import { OpenaiService } from './openai.service';
 import { SignatureGuard } from './signature.guard';
 import { PaymentService } from './payment.service';
 import { PlanesModule } from '../planes/planes.module';
+import { SuscripcionesModule } from '../suscripciones/suscripciones.module';
 
 @Module({
-  imports: [PlanesModule],
+  imports: [PlanesModule, SuscripcionesModule],
   controllers: [WhatsappController],
   providers: [WhatsappService, OpenaiService, SignatureGuard, PaymentService],
 })
 export class WhatsappModule {}
+

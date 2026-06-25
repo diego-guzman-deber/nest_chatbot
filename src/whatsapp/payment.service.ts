@@ -20,16 +20,16 @@ export class PaymentService {
   ) {}
 
   /**
-   * Obtiene el itemId y monto para un plan dado.
+   * Obtiene el itemId, monto y frecuencia para un plan dado.
    * Consulta MongoDB primero; si no encuentra el plan, verifica si es el plan de prueba.
    */
-  async resolverPlan(planNombre: string): Promise<{ itemId: string; monto: number } | null> {
+  async resolverPlan(planNombre: string): Promise<{ itemId: string; monto: number; frecuencia?: string } | null> {
     const normalized = planNombre.toLowerCase().trim();
 
     // Verificar si es el plan de prueba (no está en MongoDB)
     if (normalized.includes('prueba') || normalized === 'chatbotsus') {
       this.logger.log(`Plan de prueba detectado: "${planNombre}" → itemId=${PLAN_PRUEBA.itemId}`);
-      return PLAN_PRUEBA;
+      return { ...PLAN_PRUEBA, frecuencia: 'mensual' };
     }
 
     // Buscar en MongoDB

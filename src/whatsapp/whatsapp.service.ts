@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OpenaiService } from './openai.service';
 import { PaymentService } from './payment.service';
+import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 
 @Injectable()
 export class WhatsappService {
@@ -12,6 +13,7 @@ export class WhatsappService {
     private readonly config: ConfigService,
     private readonly openaiService: OpenaiService,
     private readonly paymentService: PaymentService,
+    private readonly suscripcionesLogService: SuscripcionesLogService,
   ) {}
 
   // ── Verificación del webhook (GET) ──────────────────────────────────────────
@@ -106,10 +108,11 @@ export class WhatsappService {
       const triggerData = match[1]; // plan|monto|nit|razonSocial|email
       const [plan, montoStr, nit, razonSocial, email] = triggerData.split('|');
 
-      // Resolver el itemId y monto exacto desde el nombre del plan (consulta MongoDB, es async)
+      // Resolver el itemId, monto y frecuencia del plan (consulta MongoDB, es async)
       const planResuelto = await this.paymentService.resolverPlan(plan);
       const monto = planResuelto?.monto ?? (parseFloat(montoStr) || 0);
       const itemId = planResuelto?.itemId ?? 'DESCONOCIDO';
+      const frecuencia = planResuelto?.frecuencia ?? 'mensual';
 
       // 1. Obtener o crear el contacto en EspoCRM para obtener el contactId correcto
       let contactId = waId;
@@ -126,8 +129,10 @@ export class WhatsappService {
         `[${waId}] 💳 Trigger de Pago QR detectado. Order: ${orderId}, Plan: ${plan} (${itemId}), Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
       );
 
-      // Pasar el email para que el polling pueda verificar por emailAddress en El Deber
-      this.procesarYEnviarPagoQR(waId, monto, orderId, razonSocial, nit, itemId, email).catch((err) => {
+      // Pasar todos los datos para que el polling guarde el log al confirmar el pago
+      this.procesarYEnviarPagoQR(
+        waId, monto, orderId, razonSocial, nit, itemId, email, plan, frecuencia, contactId,
+      ).catch((err) => {
         this.logger.error(`[${waId}] Error en el procesamiento del pago QR: ${err.message}`, err.stack);
       });
     }
@@ -143,6 +148,9 @@ export class WhatsappService {
     nit: string,
     itemId: string,
     email: string,
+    planNombre: string,
+    frecuencia: string,
+    contactIdEspocrm: string,
   ): Promise<void> {
     try {
       // 1. Obtener el QR en formato binario con los parámetros correctos de suscripciones
@@ -155,8 +163,10 @@ export class WhatsappService {
       const caption = 'Aquí tienes tu código QR para realizar el pago de tu suscripción. Una vez pagado, se activará automáticamente.';
       await this.sendMediaMessage(waId, mediaId, caption);
 
-      // 4. Iniciar el monitoreo en segundo plano (pasa el email para buscar por emailAddress)
-      this.iniciarMonitoreoPago(orderId, waId, email);
+      // 4. Iniciar el monitoreo en segundo plano (guarda el log al confirmar el pago)
+      this.iniciarMonitoreoPago(orderId, waId, email, {
+        planNombre, frecuencia, monto, nit, razonSocial, itemId, contactIdEspocrm,
+      });
     } catch (error: any) {
       this.logger.error(`[${waId}] Error generando o enviando el QR de pago: ${error.message}`);
       await this.sendMessage(
@@ -226,7 +236,20 @@ export class WhatsappService {
 
   // ── Monitorear Estado de Pago (Polling por email) ───────────────────────────
 
-  private iniciarMonitoreoPago(orderId: string, waId: string, email: string): void {
+  private iniciarMonitoreoPago(
+    orderId: string,
+    waId: string,
+    email: string,
+    datosPlan: {
+      planNombre: string;
+      frecuencia: string;
+      monto: number;
+      nit: string;
+      razonSocial: string;
+      itemId: string;
+      contactIdEspocrm: string;
+    },
+  ): void {
     let intentos = 0;
     const maxIntentos = 30; // 30 intentos × 30 segundos = 15 minutos
 
@@ -242,6 +265,25 @@ export class WhatsappService {
         if (pagado) {
           clearInterval(interval);
           this.logger.log(`[${waId}] ✅ Pago confirmado para la suscripción ${orderId}!`);
+
+          // ── Guardar log de suscripción en MongoDB ───────────────────────────
+          try {
+            await this.suscripcionesLogService.registrarPago({
+              email:            email,
+              telefono:         waId,
+              razonSocial:      datosPlan.razonSocial,
+              nit:              datosPlan.nit,
+              plan:             datosPlan.planNombre,
+              itemId:           datosPlan.itemId,
+              monto:            datosPlan.monto,
+              orderId:          orderId,
+              contactIdEspocrm: datosPlan.contactIdEspocrm,
+              frecuencia:       datosPlan.frecuencia,
+            });
+          } catch (logErr: any) {
+            this.logger.error(`[${waId}] Error al guardar log de suscripción: ${logErr.message}`);
+          }
+
           await this.sendMessage(
             waId,
             '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
