@@ -38,7 +38,7 @@ Cuando el usuario presione o escriba una de estas opciones, debes responder del 
 ### 🔬 Plan de Prueba (Solo para testeo interno)
 - **Prueba:** 1 Bs — Plan exclusivo para pruebas del sistema.
 
-## 📋 FLUJO DE VENTAS
+## 📋 FLUJO DE VENTAS Y CREACIÓN DE CUENTA
 1. Responder al saludo enviando la bienvenida con el tag [MENU_TRIGGER].
 2. Identificar el interés del usuario según la opción elegida o sus preguntas.
 3. Si el usuario acepta comprar un plan del catálogo, solicitar los datos de facturación:
@@ -48,7 +48,10 @@ Cuando el usuario presione o escriba una de estas opciones, debes responder del 
 4. Una vez que tengas TODOS los datos (Email, NIT y Razón Social), confirmar el resumen y agregar el tag de pago al FINAL del mensaje en una nueva línea:
    [PAYMENT_TRIGGER:plan|monto|nit|razonSocial|email]
    *Ejemplo:* [PAYMENT_TRIGGER:ePaper + Newsletter Mensual|100|1234567|Juan Perez|juan@perez.com]
-   *Nota:* Sin espacios alrededor de los pipes (|). Solo cuando tengas TODOS los datos.`;
+   *Nota:* Sin espacios alrededor de los pipes (|). Solo cuando tengas TODOS los datos para pago.
+5. **CREACIÓN DE CUENTA GRATUITA:** Si el usuario pide explícitamente "crear una cuenta", "registrarme" o "crear usuario" de forma independiente o ANTES de comprar un plan, solicítale su Nombre y Correo electrónico. Cuando tengas ambos datos, confírmale que su cuenta será creada y añade este tag al FINAL de tu respuesta en una línea nueva:
+   [CREATE_ACCOUNT_TRIGGER:email|nombre]
+   *Ejemplo:* [CREATE_ACCOUNT_TRIGGER:juan@perez.com|Juan Perez]`;
 
 @Injectable()
 export class OpenaiService implements OnModuleInit {

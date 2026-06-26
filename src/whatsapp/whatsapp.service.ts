@@ -112,6 +112,13 @@ export class WhatsappService {
       cleanedReply = reply.replace(triggerRegex, '').trim();
     }
 
+    // Detectar si la respuesta contiene el CREATE_ACCOUNT_TRIGGER
+    const createRegex = /\[CREATE_ACCOUNT_TRIGGER:(.*?)]/;
+    const createMatch = cleanedReply.match(createRegex);
+    if (createMatch) {
+      cleanedReply = cleanedReply.replace(createRegex, '').trim();
+    }
+
     // Detectar si la respuesta contiene el MENU_TRIGGER
     const menuRegex = /\[MENU_TRIGGER]/;
     const hasMenuTrigger = menuRegex.test(cleanedReply);
@@ -165,6 +172,15 @@ export class WhatsappService {
         waId, monto, orderId, razonSocial, nit, itemId, email, plan, frecuencia, contactId,
       ).catch((err) => {
         this.logger.error(`[${waId}] Error en el procesamiento del pago QR: ${err.message}`, err.stack);
+      });
+    } else if (createMatch) {
+      const triggerData = createMatch[1]; // email|nombre
+      const [email, nombre] = triggerData.split('|');
+
+      this.logger.log(`[${waId}] 👤 Trigger de Crear Cuenta detectado. Email: ${email}, Nombre: ${nombre}`);
+
+      this.crearCuentaIndependiente(waId, email, nombre).catch((err) => {
+        this.logger.error(`[${waId}] Error creando cuenta independiente: ${err.message}`, err.stack);
       });
     }
   }
@@ -560,6 +576,26 @@ export class WhatsappService {
     } catch (error: any) {
       const detail = error?.response?.data ?? error?.message;
       this.logger.error(`[${waId}] ❌ Error al enviar menú interactivo: ${JSON.stringify(detail)}`);
+    }
+  }
+
+  // ── Crear cuenta sin comprar un plan ─────────────────────────────────────────
+
+  private async crearCuentaIndependiente(waId: string, email: string, nombre: string): Promise<void> {
+    try {
+      // Llamamos a provisionarUsuario usando '0' como NIT y sin contactId previo
+      await this.provisionarUsuario(waId, email, nombre, '0', '');
+      
+      await this.sendMessage(
+        waId, 
+        '✅ ¡Tu cuenta ha sido creada exitosamente! Por favor, revisa la bandeja de entrada de tu correo electrónico (y la carpeta de spam por si acaso) para encontrar tus credenciales de acceso.'
+      );
+    } catch (error: any) {
+      this.logger.error(`[${waId}] Error creando cuenta independiente: ${error.message}`);
+      await this.sendMessage(
+        waId, 
+        'Lo siento, ocurrió un problema al intentar crear tu cuenta. Por favor, intenta de nuevo más tarde o verifica si tu correo ya está registrado.'
+      );
     }
   }
 }
