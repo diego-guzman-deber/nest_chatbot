@@ -7,9 +7,10 @@ import { PaymentService } from './payment.service';
 import { PlanesModule } from '../planes/planes.module';
 import { SuscripcionesModule } from '../suscripciones/suscripciones.module';
 import { EspoCrmModule } from '../espocrm/espocrm.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [PlanesModule, SuscripcionesModule, EspoCrmModule],
+  imports: [PlanesModule, SuscripcionesModule, EspoCrmModule, MailModule],
   controllers: [WhatsappController],
   providers: [WhatsappService, OpenaiService, SignatureGuard, PaymentService],
 })

@@ -13,6 +13,7 @@ export interface EspoContacto {
   emailAddress: string;
   cSubscribed: boolean | number | string;
   cIdpaywall?: string;
+  cPassword?: string;
 }
 
 /**
@@ -73,7 +74,7 @@ export class EspoContactService {
           'whereGroup[0][type]': 'equals',
           'whereGroup[0][attribute]': 'emailAddress',
           'whereGroup[0][value]': cleanEmail,
-          attributeSelect: 'id,name,firstName,lastName,emailAddress,cSubscribed,cIdpaywall',
+          attributeSelect: 'id,name,firstName,lastName,emailAddress,cSubscribed,cIdpaywall,cPassword',
         },
       });
 
@@ -249,6 +250,95 @@ export class EspoContactService {
     } catch (error: any) {
       this.logger.error(
         `Error al activar suscripción en EspoCRM para contacto ID ${contactId}: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Actualiza la contraseña cifrada (cPassword) de un contacto existente.
+   */
+  async actualizarPassword(contactId: string, contraseniaCifrada: string): Promise<void> {
+    const url = `${this.baseUrl}/Contact/${contactId}`;
+
+    try {
+      this.logger.log(`Actualizando contraseña en EspoCRM para contacto ID: ${contactId}`);
+
+      await axios.put(
+        url,
+        { cPassword: contraseniaCifrada },
+        { headers: this.headers },
+      );
+
+      this.logger.log(`✅ Contraseña actualizada con éxito para contacto ID: ${contactId}`);
+    } catch (error: any) {
+      this.logger.error(
+        `Error al actualizar contraseña para contacto ID ${contactId}: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Crea un contacto en EspoCRM con toda la información disponible, incluyendo
+   * contraseña cifrada, teléfono y NIT.
+   * Retorna el contactId (string).
+   */
+  async crearContactoCompleto(
+    email: string,
+    razonSocial: string,
+    telefono: string,
+    nit: string,
+    contraseniaCifrada: string,
+  ): Promise<string> {
+    const cleanEmail = email.toLowerCase().trim();
+    const url = `${this.baseUrl}/Contact`;
+
+    try {
+      let firstName = 'Usuario';
+      let lastName = 'Chatbot';
+      const nameParts = (razonSocial || '').trim().split(/\s+/);
+      if (nameParts.length > 0 && nameParts[0]) {
+        firstName = nameParts[0];
+        lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'Chatbot';
+      }
+
+      this.logger.log(
+        `Creando contacto completo en EspoCRM: ${cleanEmail} (NIT: ${nit}, Tel: ${telefono})`,
+      );
+
+      const createRes = await axios.post(
+        url,
+        {
+          name: razonSocial || 'Usuario Chatbot',
+          firstName,
+          lastName,
+          emailAddress: cleanEmail,
+          emailAddressData: [
+            {
+              emailAddress: cleanEmail,
+              primary: true,
+              optOut: false,
+              invalid: false,
+              lower: cleanEmail,
+            },
+          ],
+          cSubscribed: 1, // Se activa directamente la suscripción en la creación si el pago fue exitoso
+          cPassword: contraseniaCifrada,
+          description: telefono,
+          cIdentificationnumber: nit,
+        },
+        { headers: this.headers },
+      );
+
+      const newContactId: string = createRes.data.id;
+      this.logger.log(`Contacto completo creado en EspoCRM: ${cleanEmail} → ID: ${newContactId}`);
+      return newContactId;
+    } catch (error: any) {
+      this.logger.error(
+        `Error en crearContactoCompleto para ${cleanEmail}: ${error.message}`,
         error.stack,
       );
       throw error;

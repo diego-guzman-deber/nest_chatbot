@@ -5,6 +5,7 @@ import { OpenaiService } from './openai.service';
 import { PaymentService } from './payment.service';
 import { EspoContactService } from '../espocrm/espo-contact.service';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class WhatsappService {
@@ -16,6 +17,7 @@ export class WhatsappService {
     private readonly paymentService: PaymentService,
     private readonly espoContactService: EspoContactService,
     private readonly suscripcionesLogService: SuscripcionesLogService,
+    private readonly mailService: MailService,
   ) {}
 
   // ── Verificación del webhook (GET) ──────────────────────────────────────────
@@ -295,7 +297,21 @@ export class WhatsappService {
           clearInterval(interval);
           this.logger.log(`[${waId}] ✅ Pago confirmado para la suscripción ${orderId}!`);
 
-          // ── 1. Guardar log de suscripción en MongoDB ──────────────────────
+          // ── 1. Aprovisionar usuario y contraseña (compatible con Paywall) ────────
+          let contactIdReal = datosPlan.contactIdEspocrm;
+          try {
+            contactIdReal = await this.provisionarUsuario(
+              waId,
+              email,
+              datosPlan.razonSocial,
+              datosPlan.nit,
+              datosPlan.contactIdEspocrm,
+            );
+          } catch (provErr: any) {
+            this.logger.error(`[${waId}] Error al provisionar usuario/contacto: ${provErr.message}`, provErr.stack);
+          }
+
+          // ── 2. Guardar log de suscripción en MongoDB ──────────────────────
           try {
             await this.suscripcionesLogService.registrarPago({
               email:            email,
@@ -306,17 +322,21 @@ export class WhatsappService {
               itemId:           datosPlan.itemId,
               monto:            datosPlan.monto,
               orderId:          orderId,
-              contactIdEspocrm: datosPlan.contactIdEspocrm,
+              contactIdEspocrm: contactIdReal,
               frecuencia:       datosPlan.frecuencia,
             });
           } catch (logErr: any) {
             this.logger.error(`[${waId}] Error al guardar log de suscripción: ${logErr.message}`);
           }
 
-          // ── 2. Activar suscripción en EspoCRM (equivalente al Paywall) ───
-          await this.activarEnPaywall(waId, datosPlan.contactIdEspocrm, email);
+          // ── 3. Asegurar activación de la suscripción (cSubscribed = 1) ───
+          try {
+            await this.espoContactService.activarSuscripcion(contactIdReal);
+          } catch (actErr: any) {
+            this.logger.error(`[${waId}] Error al asegurar la activación de la suscripción: ${actErr.message}`);
+          }
 
-          // ── 3. Notificar al usuario por WhatsApp ──────────────────────────
+          // ── 4. Notificar al usuario por WhatsApp ──────────────────────────
           await this.sendMessage(
             waId,
             '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
@@ -338,48 +358,83 @@ export class WhatsappService {
     }, 30000);
   }
 
-  // ── Activar suscripción en EspoCRM post-pago ────────────────────────────────
+  // ── Aprovisionar usuario y credenciales post-pago ────────────────────────────
 
   /**
-   * Orquesta la activación de la suscripción en EspoCRM tras un pago confirmado.
-   * Si el contactId es válido (no es el waId de fallback), llama directamente.
-   * Si hay error, lo captura y loguea sin interrumpir el flujo del usuario
-   * (el pago ya ocurrió y el log ya fue guardado).
+   * Verifica si el usuario ya existe en EspoCRM.
+   * Si no existe, lo crea con los datos del chatbot, le genera una contraseña temporal,
+   * la cifra con el formato compatible con Paywall, y envía las credenciales por mail.
+   * Si existe sin contraseña, le asigna una nueva y la envía por mail.
+   * Retorna el contactId final.
    */
-  private async activarEnPaywall(
+  private async provisionarUsuario(
     waId: string,
-    contactIdEspocrm: string,
     email: string,
-  ): Promise<void> {
-    try {
-      // Si no tenemos un contactId real de EspoCRM (se usó waId como fallback),
-      // intentamos obtenerlo de nuevo a partir del email antes de activar.
-      let contactId = contactIdEspocrm;
-      if (contactId === waId) {
-        this.logger.warn(
-          `[${waId}] contactIdEspocrm es el waId de fallback. Intentando resolver desde email: ${email}`,
-        );
-        const contacto = await this.espoContactService.buscarContactoPorEmail(email);
-        if (!contacto) {
-          this.logger.error(
-            `[${waId}] No se encontró el contacto en EspoCRM para ${email}. No se puede activar la suscripción.`,
-          );
-          return;
-        }
-        contactId = contacto.id;
+    razonSocial: string,
+    nit: string,
+    contactIdEspocrm: string,
+  ): Promise<string> {
+    const key = this.config.get<string>('PASSWORD_ENCRYPTION_KEY') ?? '1028283021';
+    let contacto = await this.espoContactService.buscarContactoPorEmail(email);
+
+    if (!contacto) {
+      // Caso 1: El contacto no existe en EspoCRM
+      this.logger.log(`[${waId}] Contacto no registrado en EspoCRM para ${email}. Creando contacto con contraseña...`);
+      const contraseniaPlana = this.generarContraseniaTemporal(email, waId);
+      const contraseniaCifrada = Buffer.from(key + contraseniaPlana).toString('base64');
+
+      const nuevoId = await this.espoContactService.crearContactoCompleto(
+        email,
+        razonSocial,
+        waId,
+        nit,
+        contraseniaCifrada,
+      );
+
+      // Enviar credenciales al correo
+      try {
+        await this.mailService.enviarCredenciales(email, contraseniaPlana, razonSocial || 'Usuario');
+      } catch (mailErr: any) {
+        this.logger.error(`[${waId}] Error enviando correo de credenciales a ${email}: ${mailErr.message}`);
       }
 
-      await this.espoContactService.activarSuscripcion(contactId);
-      this.logger.log(`[${waId}] ✅ Suscripción activada en EspoCRM para contacto: ${contactId}`);
-    } catch (error: any) {
-      // El error no debe impedir que el usuario reciba su mensaje de confirmación.
-      // El pago ya fue procesado; la activación puede reintentarse manualmente si es necesario.
-      this.logger.error(
-        `[${waId}] ❌ Error al activar suscripción en EspoCRM: ${error.message}. ` +
-        `El pago fue confirmado y el log guardado, pero cSubscribed no fue actualizado.`,
-        error.stack,
-      );
+      return nuevoId;
+    } else {
+      // Caso 2: El contacto existe
+      this.logger.log(`[${waId}] Contacto existente encontrado en EspoCRM para ${email} (ID: ${contacto.id})`);
+
+      // Verificar si no tiene password asignado (cPassword vacío o nulo)
+      if (!contacto.cPassword) {
+        this.logger.log(`[${waId}] El contacto existe pero no tiene contraseña asignada (cPassword vacío). Asignando una temporal...`);
+        const contraseniaPlana = this.generarContraseniaTemporal(email, waId);
+        const contraseniaCifrada = Buffer.from(key + contraseniaPlana).toString('base64');
+
+        await this.espoContactService.actualizarPassword(contacto.id, contraseniaCifrada);
+
+        // Enviar credenciales al correo
+        try {
+          await this.mailService.enviarCredenciales(email, contraseniaPlana, contacto.name || razonSocial || 'Usuario');
+        } catch (mailErr: any) {
+          this.logger.error(`[${waId}] Error enviando correo de credenciales a ${email}: ${mailErr.message}`);
+        }
+      } else {
+        this.logger.log(`[${waId}] El contacto ya tiene una contraseña (cPassword) asignada en EspoCRM.`);
+      }
+
+      return contacto.id;
     }
+  }
+
+  /**
+   * Genera una contraseña temporal basada en el email y el waId:
+   * primeras 3 letras del email + últimos 4 dígitos del teléfono
+   */
+  private generarContraseniaTemporal(email: string, waId: string): string {
+    const cleanEmail = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    const emailPrefix = cleanEmail.substring(0, 3).padEnd(3, 'x'); // Asegura 3 caracteres mínimos
+    const phoneDigits = waId.trim().replace(/\D/g, ''); // Solo dígitos del teléfono
+    const phoneSuffix = phoneDigits.substring(phoneDigits.length - 4).padEnd(4, '0'); // Asegura 4 dígitos mínimos
+    return `${emailPrefix}${phoneSuffix}`;
   }
 
   // ── Limpiar texto para WhatsApp ──────────────────────────────────────────────
