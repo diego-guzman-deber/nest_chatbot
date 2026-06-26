@@ -389,6 +389,7 @@ export class WhatsappService {
     razonSocial: string,
     nit: string,
     contactIdEspocrm: string,
+    activarSuscripcion: boolean = true,
   ): Promise<string> {
     const key = this.config.get<string>('PASSWORD_ENCRYPTION_KEY') ?? '1028283021';
     let contacto = await this.espoContactService.buscarContactoPorEmail(email);
@@ -405,6 +406,7 @@ export class WhatsappService {
         waId,
         nit,
         contraseniaCifrada,
+        activarSuscripcion,
       );
 
       // Enviar credenciales al correo
@@ -583,8 +585,9 @@ export class WhatsappService {
 
   private async crearCuentaIndependiente(waId: string, email: string, nombre: string): Promise<void> {
     try {
-      // Llamamos a provisionarUsuario usando '0' como NIT y sin contactId previo
-      await this.provisionarUsuario(waId, email, nombre, '0', '');
+      // Llamamos a provisionarUsuario usando '0' como NIT y sin contactId previo.
+      // Pasamos false al final para NO activar la suscripción.
+      await this.provisionarUsuario(waId, email, nombre, '0', '', false);
       
       await this.sendMessage(
         waId, 

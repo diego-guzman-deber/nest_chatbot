@@ -292,6 +292,7 @@ export class EspoContactService {
     telefono: string,
     nit: string,
     contraseniaCifrada: string,
+    activarSuscripcion: boolean = true,
   ): Promise<string> {
     const cleanEmail = email.toLowerCase().trim();
     const url = `${this.baseUrl}/Contact`;
@@ -306,7 +307,7 @@ export class EspoContactService {
       }
 
       this.logger.log(
-        `Creando contacto completo en EspoCRM: ${cleanEmail} (NIT: ${nit}, Tel: ${telefono})`,
+        `Creando contacto completo en EspoCRM: ${cleanEmail} (NIT: ${nit}, Tel: ${telefono}, Suscrito: ${activarSuscripcion})`,
       );
 
       const createRes = await axios.post(
@@ -325,7 +326,7 @@ export class EspoContactService {
               lower: cleanEmail,
             },
           ],
-          cSubscribed: 1, // Se activa directamente la suscripción en la creación si el pago fue exitoso
+          cSubscribed: activarSuscripcion ? 1 : 0, // Se activa solo si es un pago exitoso
           cPassword: contraseniaCifrada,
           description: telefono,
           cIdentificationnumber: nit,
