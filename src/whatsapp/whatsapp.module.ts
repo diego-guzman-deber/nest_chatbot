@@ -6,11 +6,11 @@ import { SignatureGuard } from './signature.guard';
 import { PaymentService } from './payment.service';
 import { PlanesModule } from '../planes/planes.module';
 import { SuscripcionesModule } from '../suscripciones/suscripciones.module';
+import { EspoCrmModule } from '../espocrm/espocrm.module';
 
 @Module({
-  imports: [PlanesModule, SuscripcionesModule],
+  imports: [PlanesModule, SuscripcionesModule, EspoCrmModule],
   controllers: [WhatsappController],
   providers: [WhatsappService, OpenaiService, SignatureGuard, PaymentService],
 })
 export class WhatsappModule {}
-

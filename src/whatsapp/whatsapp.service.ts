@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OpenaiService } from './openai.service';
 import { PaymentService } from './payment.service';
+import { EspoContactService } from '../espocrm/espo-contact.service';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class WhatsappService {
     private readonly config: ConfigService,
     private readonly openaiService: OpenaiService,
     private readonly paymentService: PaymentService,
+    private readonly espoContactService: EspoContactService,
     private readonly suscripcionesLogService: SuscripcionesLogService,
   ) {}
 
@@ -99,7 +101,7 @@ export class WhatsappService {
     }
 
     // Detectar si la respuesta contiene el PAYMENT_TRIGGER
-    const triggerRegex = /\[PAYMENT_TRIGGER:(.*?)\]/;
+    const triggerRegex = /\[PAYMENT_TRIGGER:(.*?)]/;
     const match = reply.match(triggerRegex);
     let cleanedReply = reply;
 
@@ -109,7 +111,7 @@ export class WhatsappService {
     }
 
     // Detectar si la respuesta contiene el MENU_TRIGGER
-    const menuRegex = /\[MENU_TRIGGER\]/;
+    const menuRegex = /\[MENU_TRIGGER]/;
     const hasMenuTrigger = menuRegex.test(cleanedReply);
     if (hasMenuTrigger) {
       cleanedReply = cleanedReply.replace(menuRegex, '').trim();
@@ -142,9 +144,11 @@ export class WhatsappService {
       // 1. Obtener o crear el contacto en EspoCRM para obtener el contactId correcto
       let contactId = waId;
       try {
-        contactId = await this.paymentService.obtenerOCrearContacto(email, razonSocial);
+        contactId = await this.espoContactService.obtenerOCrearContacto(email, razonSocial);
       } catch (err: any) {
-        this.logger.warn(`[${waId}] No se pudo obtener o crear el contacto en EspoCRM para ${email}: ${err.message}. Se usará waId como fallback.`);
+        this.logger.warn(
+          `[${waId}] No se pudo obtener o crear el contacto en EspoCRM para ${email}: ${err.message}. Se usará waId como fallback.`,
+        );
       }
 
       // 2. Generar el orderId de suscripción: wa-{contactId}-{YYYYMM}
@@ -284,14 +288,14 @@ export class WhatsappService {
       intentos++;
 
       try {
-        // Busca por email del usuario en la API de El Deber (igual que cybersource-callback.php)
-        const pagado = await this.paymentService.consultarEstadoPago(orderId, email);
+        // Busca por email del usuario en EspoCRM (igual que cybersource-callback.php del Paywall)
+        const pagado = await this.espoContactService.consultarSuscripcionActiva(orderId, email);
 
         if (pagado) {
           clearInterval(interval);
           this.logger.log(`[${waId}] ✅ Pago confirmado para la suscripción ${orderId}!`);
 
-          // ── Guardar log de suscripción en MongoDB ───────────────────────────
+          // ── 1. Guardar log de suscripción en MongoDB ──────────────────────
           try {
             await this.suscripcionesLogService.registrarPago({
               email:            email,
@@ -309,6 +313,10 @@ export class WhatsappService {
             this.logger.error(`[${waId}] Error al guardar log de suscripción: ${logErr.message}`);
           }
 
+          // ── 2. Activar suscripción en EspoCRM (equivalente al Paywall) ───
+          await this.activarEnPaywall(waId, datosPlan.contactIdEspocrm, email);
+
+          // ── 3. Notificar al usuario por WhatsApp ──────────────────────────
           await this.sendMessage(
             waId,
             '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
@@ -328,6 +336,50 @@ export class WhatsappService {
         );
       }
     }, 30000);
+  }
+
+  // ── Activar suscripción en EspoCRM post-pago ────────────────────────────────
+
+  /**
+   * Orquesta la activación de la suscripción en EspoCRM tras un pago confirmado.
+   * Si el contactId es válido (no es el waId de fallback), llama directamente.
+   * Si hay error, lo captura y loguea sin interrumpir el flujo del usuario
+   * (el pago ya ocurrió y el log ya fue guardado).
+   */
+  private async activarEnPaywall(
+    waId: string,
+    contactIdEspocrm: string,
+    email: string,
+  ): Promise<void> {
+    try {
+      // Si no tenemos un contactId real de EspoCRM (se usó waId como fallback),
+      // intentamos obtenerlo de nuevo a partir del email antes de activar.
+      let contactId = contactIdEspocrm;
+      if (contactId === waId) {
+        this.logger.warn(
+          `[${waId}] contactIdEspocrm es el waId de fallback. Intentando resolver desde email: ${email}`,
+        );
+        const contacto = await this.espoContactService.buscarContactoPorEmail(email);
+        if (!contacto) {
+          this.logger.error(
+            `[${waId}] No se encontró el contacto en EspoCRM para ${email}. No se puede activar la suscripción.`,
+          );
+          return;
+        }
+        contactId = contacto.id;
+      }
+
+      await this.espoContactService.activarSuscripcion(contactId);
+      this.logger.log(`[${waId}] ✅ Suscripción activada en EspoCRM para contacto: ${contactId}`);
+    } catch (error: any) {
+      // El error no debe impedir que el usuario reciba su mensaje de confirmación.
+      // El pago ya fue procesado; la activación puede reintentarse manualmente si es necesario.
+      this.logger.error(
+        `[${waId}] ❌ Error al activar suscripción en EspoCRM: ${error.message}. ` +
+        `El pago fue confirmado y el log guardado, pero cSubscribed no fue actualizado.`,
+        error.stack,
+      );
+    }
   }
 
   // ── Limpiar texto para WhatsApp ──────────────────────────────────────────────
