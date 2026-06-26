@@ -16,8 +16,8 @@ export class MailService {
    * Envía un correo con las credenciales de acceso al usuario.
    */
   async enviarCredenciales(email: string, contraseniaPlana: string, nombre: string): Promise<void> {
-    // Usamos el correo de prueba de Resend obligatoriamente hasta que verifiques tu dominio
-    const from = 'onboarding@resend.dev';
+    // Ahora que el dominio eldeber.bo está verificado, usamos el remitente correcto
+    const from = this.config.get<string>('MAIL_FROM') ?? 'El Deber <no-reply@eldeber.bo>';
     const loginUrl = 'https://suscripciones.eldeber.com.bo/login';
 
     const html = `
