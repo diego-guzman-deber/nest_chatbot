@@ -6,6 +6,7 @@ import { PaymentService } from './payment.service';
 import { EspoContactService } from '../espocrm/espo-contact.service';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 import { MailService } from '../mail/mail.service';
+import { PlanesService } from '../planes/planes.service';
 
 @Injectable()
 export class WhatsappService {
@@ -18,6 +19,7 @@ export class WhatsappService {
     private readonly espoContactService: EspoContactService,
     private readonly suscripcionesLogService: SuscripcionesLogService,
     private readonly mailService: MailService,
+    private readonly planesService: PlanesService,
   ) {}
 
   // ── Verificación del webhook (GET) ──────────────────────────────────────────
@@ -94,6 +96,38 @@ export class WhatsappService {
     }
 
     this.logger.log(`[${waId}] Mensaje de ${name} (tipo: ${message.type}): ${messageBody.slice(0, 80)}`);
+
+    // Interceptar "Ver planes" para responder de forma estática y rápida
+    let isVerPlanes = false;
+    if (message.type === 'text') {
+      const norm = messageBody.toLowerCase().trim();
+      if (norm === 'ver planes' || norm === 'planes' || norm === 'quiero conocer los planes disponibles') {
+        isVerPlanes = true;
+      }
+    } else if (message.type === 'interactive') {
+      const interactive = message.interactive;
+      if (interactive?.type === 'list_reply') {
+        if (interactive.list_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes') {
+          isVerPlanes = true;
+        }
+      } else if (interactive?.type === 'button_reply') {
+        if (interactive.button_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes') {
+          isVerPlanes = true;
+        }
+      }
+    }
+
+    if (isVerPlanes) {
+      this.logger.log(`[${waId}] Interceptado "Ver planes". Respondiendo con catálogo estático.`);
+      try {
+        const catalogo = await this.planesService.generarCatalogoEstatico();
+        await this.sendMessage(waId, catalogo);
+      } catch (err: any) {
+        this.logger.error(`Error al responder con catálogo estático: ${err.message}`, err.stack);
+        // Si hay un error al obtener de la DB, seguirá con el flujo normal de la IA como fallback
+      }
+      return;
+    }
 
     // Generar respuesta con OpenAI
     const reply = await this.openaiService.generateResponse(messageBody, waId, name);
@@ -541,11 +575,6 @@ export class WhatsappService {
                   description: 'Quiero conocer los planes disponibles',
                 },
                 {
-                  id: 'menu_ya_soy_cliente',
-                  title: 'Ya soy cliente',
-                  description: 'Gestionar mi cuenta o ver mi suscripción',
-                },
-                {
                   id: 'menu_renovar_plan',
                   title: 'Renovar mi plan',
                   description: 'Quiero renovar mi suscripción',
@@ -558,7 +587,7 @@ export class WhatsappService {
                 {
                   id: 'menu_hablar_asesor',
                   title: 'Hablar con asesor',
-                  description: 'Quiero hablar con un asesor humano',
+                  description: 'Quiero hablar con un asesor',
                 },
               ],
             },

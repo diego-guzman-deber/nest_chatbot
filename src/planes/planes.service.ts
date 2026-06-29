@@ -237,4 +237,32 @@ export class PlanesService implements OnModuleInit {
 
     return catalogo.trim();
   }
+
+  // ── Generar catálogo estático sin markdown pesado (### y **) ────────────────
+  async generarCatalogoEstatico(): Promise<string> {
+    const planes = await this.findAll();
+
+    const porCategoria: Record<string, PlanDocument[]> = {};
+    for (const p of planes) {
+      if (!porCategoria[p.categoria]) porCategoria[p.categoria] = [];
+      porCategoria[p.categoria].push(p);
+    }
+
+    const titulos: Record<string, string> = {
+      newsletter: '📧 Solo Newsletter (Boletín diario por correo)',
+      epaper:     '📱 ePaper + Newsletter (Periódico digital + boletín)',
+      combo:      '🏢 Combos Digitales (Múltiples cuentas)',
+      impreso:    '📰 Impreso + ePaper + Newsletter (Físico + digital)',
+    };
+
+    let catalogo = 'Claro, aquí tienes los planes de suscripción disponibles en El Deber:\n';
+    for (const [cat, ps] of Object.entries(porCategoria)) {
+      catalogo += `\n${titulos[cat] ?? cat}\n`;
+      for (const p of ps) {
+        catalogo += `- ${p.nombre}: ${p.monto} Bs — ${p.descripcion}\n`;
+      }
+    }
+
+    return catalogo.trim();
+  }
 }
