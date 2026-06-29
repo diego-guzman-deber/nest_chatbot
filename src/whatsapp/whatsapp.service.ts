@@ -101,17 +101,17 @@ export class WhatsappService {
     let isVerPlanes = false;
     if (message.type === 'text') {
       const norm = messageBody.toLowerCase().trim();
-      if (norm === 'ver planes' || norm === 'planes' || norm === '') {
+      if (norm === 'ver planes' || norm === 'planes' || norm === 'quiero conocer los planes disponibles' || norm === 'ver planes disponibles') {
         isVerPlanes = true;
       }
     } else if (message.type === 'interactive') {
       const interactive = message.interactive;
       if (interactive?.type === 'list_reply') {
-        if (interactive.list_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes') {
+        if (interactive.list_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes' || messageBody.toLowerCase().trim() === 'ver planes disponibles') {
           isVerPlanes = true;
         }
       } else if (interactive?.type === 'button_reply') {
-        if (interactive.button_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes') {
+        if (interactive.button_reply?.id === 'menu_ver_planes' || messageBody.toLowerCase().trim() === 'ver planes' || messageBody.toLowerCase().trim() === 'ver planes disponibles') {
           isVerPlanes = true;
         }
       }
@@ -598,23 +598,19 @@ export class WhatsappService {
               rows: [
                 {
                   id: 'menu_ver_planes',
-                  title: 'Ver planes',
-                  description: 'Quiero conocer los planes disponibles',
+                  title: 'Ver planes disponibles',
                 },
                 {
                   id: 'menu_renovar_plan',
                   title: 'Renovar mi plan',
-                  description: 'Quiero renovar mi suscripción',
                 },
                 {
                   id: 'menu_preguntas_frecuentes',
                   title: 'Preguntas frecuentes',
-                  description: 'Tengo dudas sobre los planes o el servicio',
                 },
                 {
                   id: 'menu_hablar_asesor',
                   title: 'Hablar con asesor',
-                  description: 'Quiero hablar con un asesor',
                 },
               ],
             },
