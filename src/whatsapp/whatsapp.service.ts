@@ -101,7 +101,7 @@ export class WhatsappService {
     let isVerPlanes = false;
     if (message.type === 'text') {
       const norm = messageBody.toLowerCase().trim();
-      if (norm === 'ver planes' || norm === 'planes' || norm === 'quiero conocer los planes disponibles') {
+      if (norm === 'ver planes' || norm === 'planes' || norm === '') {
         isVerPlanes = true;
       }
     } else if (message.type === 'interactive') {
@@ -126,6 +126,33 @@ export class WhatsappService {
         this.logger.error(`Error al responder con catálogo estático: ${err.message}`, err.stack);
         // Si hay un error al obtener de la DB, seguirá con el flujo normal de la IA como fallback
       }
+      return;
+    }
+
+    // Interceptar "Hablar con asesor" para responder de forma estática y rápida
+    let isHablarAsesor = false;
+    if (message.type === 'text') {
+      const norm = messageBody.toLowerCase().trim();
+      if (norm === 'hablar con asesor' || norm === 'hablar con un asesor' || norm === 'asesor') {
+        isHablarAsesor = true;
+      }
+    } else if (message.type === 'interactive') {
+      const interactive = message.interactive;
+      if (interactive?.type === 'list_reply') {
+        if (interactive.list_reply?.id === 'menu_hablar_asesor' || messageBody.toLowerCase().trim() === 'hablar con asesor') {
+          isHablarAsesor = true;
+        }
+      } else if (interactive?.type === 'button_reply') {
+        if (interactive.button_reply?.id === 'menu_hablar_asesor' || messageBody.toLowerCase().trim() === 'hablar con asesor') {
+          isHablarAsesor = true;
+        }
+      }
+    }
+
+    if (isHablarAsesor) {
+      this.logger.log(`[${waId}] Interceptado "Hablar con asesor". Respondiendo con datos de Carlos Hurtado.`);
+      const msg = 'Claro que sí. Puedes comunicarte directamente con nuestro asesor *Carlos Hurtado* al número de WhatsApp *+591 77305605* o ingresando directamente a este enlace: https://wa.me/59177305605';
+      await this.sendMessage(waId, msg);
       return;
     }
 
