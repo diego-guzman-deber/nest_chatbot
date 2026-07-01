@@ -14,6 +14,8 @@ export interface EspoContacto {
   cSubscribed: boolean | number | string;
   cIdpaywall?: string;
   cPassword?: string;
+  /** Fecha de última modificación del registro (campo estándar de EspoCRM) */
+  modifiedAt?: string;
 }
 
 /**
@@ -74,7 +76,7 @@ export class EspoContactService {
           'whereGroup[0][type]': 'equals',
           'whereGroup[0][attribute]': 'emailAddress',
           'whereGroup[0][value]': cleanEmail,
-          attributeSelect: 'id,name,firstName,lastName,emailAddress,cSubscribed,cIdpaywall,cPassword',
+          attributeSelect: 'id,name,firstName,lastName,emailAddress,cSubscribed,cIdpaywall,cPassword,modifiedAt',
         },
       });
 
@@ -161,31 +163,59 @@ export class EspoContactService {
   }
 
   /**
-   * Consulta si un usuario tiene suscripción activa en EspoCRM (cSubscribed = true).
-   * Busca primero por email del usuario, y como fallback por orderId (cIdpaywall).
+   * Consulta el estado de pago de una orden. Retorna:
+   *   - 'confirmado': cSubscribed=true Y hay evidencia de que el contacto fue
+   *     tocado DESPUÉS de generar el QR (o es un contacto nuevo, sin baseline).
+   *   - 'pendiente': todavía no hay señal de pago para esta orden.
+   *   - 'sin_senal_confiable': el contacto ya estaba suscrito antes de esta orden
+   *     y EspoCRM no devolvió `modifiedAt` para poder comparar, así que no hay
+   *     forma segura de saber si esta orden puntual fue pagada. No debe auto-
+   *     confirmarse: el llamador debe derivarlo a revisión manual.
+   *
+   * NOTA IMPORTANTE (verificado contra el proyecto Paywall en PHP, que es el que
+   * corre hoy en producción): el campo `cIdpaywall` NO es un identificador de orden
+   * de pago. Es el ID del usuario en el sistema externo de autenticación "Paywall"
+   * (ver login.php / api/login.php), que se asigna una única vez al crear el
+   * contacto y nunca se vuelve a actualizar. Producción tampoco liga la
+   * confirmación de pago a un orderId específico: solo revisa `cSubscribed` por
+   * email (ver index.php, "actualiza la página para verificar el estado"). Por lo
+   * tanto NO se puede usar cIdpaywall para atar el pago a esta orden.
+   *
+   * En su lugar usamos `modifiedAt` (campo estándar de EspoCRM, se actualiza en
+   * cada escritura sobre el registro): si el llamador pasa `sinceModifiedAt`
+   * (una foto de `modifiedAt` tomada ANTES de generar el QR), solo se considera
+   * "pagado" cuando cSubscribed=true Y modifiedAt es posterior a esa foto. Esto
+   * detecta tanto altas nuevas como renovaciones de alguien que ya estaba
+   * suscrito, sin depender de que cIdpaywall cambie (no cambia).
+   *
+   * SUPUESTO SIN VERIFICAR: no se pudo confirmar contra una instancia real de
+   * EspoCRM que el backend del banco efectivamente actualiza `modifiedAt` al
+   * confirmar el pago (es el comportamiento estándar de EspoCRM, pero depende
+   * de que ese proceso externo haga un PUT sobre el contacto). Probar con el
+   * plan de prueba de 1 Bs sobre una cuenta ya suscrita antes de confiar del todo.
+   *
+   * Lanza una excepción si la consulta a EspoCRM falla por un motivo distinto a
+   * "contacto no encontrado" (404), para que el llamador pueda distinguir entre
+   * "todavía no pagó" y "no pudimos verificar por un error técnico".
    *
    * Migrado desde PaymentService.consultarEstadoPago().
-   * La lógica es equivalente a la que usa cybersource-callback.php del Paywall.
    */
-  async consultarSuscripcionActiva(orderId: string, email?: string): Promise<boolean> {
+  async consultarEstadoPagoOrden(
+    orderId: string,
+    email: string,
+    sinceModifiedAt?: string,
+  ): Promise<'confirmado' | 'pendiente' | 'sin_senal_confiable'> {
     const url = `${this.baseUrl}/Contact`;
 
     try {
       const params: Record<string, any> = {
         maxSize: 1,
         offset: 0,
-        attributeSelect: 'id,name,cSubscribed,cIdpaywall,emailAddress',
+        attributeSelect: 'id,name,cSubscribed,cIdpaywall,emailAddress,modifiedAt',
+        'whereGroup[0][type]': 'equals',
+        'whereGroup[0][attribute]': 'emailAddress',
+        'whereGroup[0][value]': email.toLowerCase().trim(),
       };
-
-      if (email) {
-        params['whereGroup[0][type]'] = 'equals';
-        params['whereGroup[0][attribute]'] = 'emailAddress';
-        params['whereGroup[0][value]'] = email.toLowerCase().trim();
-      } else {
-        params['whereGroup[0][type]'] = 'equals';
-        params['whereGroup[0][attribute]'] = 'cIdpaywall';
-        params['whereGroup[0][value]'] = orderId;
-      }
 
       const response = await axios.get(url, {
         headers: { 'x-api-key': this.apiKey },
@@ -201,27 +231,52 @@ export class EspoContactService {
           contacto.cSubscribed === 1 ||
           contacto.cSubscribed === '1';
 
-        if (suscrito) {
-          this.logger.log(
-            `Suscripción activa confirmada para ${email ?? orderId}. Contacto: ${contacto.name} (ID: ${contacto.id})`,
-          );
-          return true;
+        if (!suscrito) {
+          this.logger.debug(`Suscripción aún no activa en EspoCRM para ${email} (orden ${orderId}).`);
+          return 'pendiente';
         }
+
+        // Sin baseline (no debería pasar en el flujo normal): confirmar por cSubscribed.
+        if (!sinceModifiedAt) {
+          this.logger.log(`Suscripción activa confirmada para ${email} (orden ${orderId}), sin baseline de modifiedAt.`);
+          return 'confirmado';
+        }
+
+        if (!contacto.modifiedAt) {
+          this.logger.warn(
+            `EspoCRM no devolvió modifiedAt para ${email} (orden ${orderId}). No se puede confirmar automáticamente esta orden.`,
+          );
+          return 'sin_senal_confiable';
+        }
+
+        if (new Date(contacto.modifiedAt).getTime() > new Date(sinceModifiedAt).getTime()) {
+          this.logger.log(
+            `Pago confirmado para ${email} (orden ${orderId}): modifiedAt cambió de ${sinceModifiedAt} a ${contacto.modifiedAt}.`,
+          );
+          return 'confirmado';
+        }
+
+        this.logger.debug(
+          `Contacto ${email} ya está suscrito pero modifiedAt no cambió desde ${sinceModifiedAt}. La orden ${orderId} aún no fue pagada.`,
+        );
+        return 'pendiente';
       }
 
-      this.logger.debug(`Suscripción aún no activa en EspoCRM para ${email ?? orderId}.`);
-      return false;
+      this.logger.debug(`Contacto no encontrado en EspoCRM para ${email} (orden ${orderId}).`);
+      return 'pendiente';
     } catch (error: unknown) {
       const axiosError = error as AxiosError;
       const status = axiosError?.response?.status;
       if (status === 404) {
-        this.logger.debug(`Contacto no registrado en EspoCRM aún (404) para ${email ?? orderId}.`);
-      } else {
-        this.logger.warn(
-          `Error al consultar suscripción para ${email ?? orderId}: ${axiosError.message} (HTTP ${status ?? 'desconocido'})`,
-        );
+        this.logger.debug(`Contacto no registrado en EspoCRM aún (404) para ${email}.`);
+        return 'pendiente';
       }
-      return false;
+      // No swallowear: un error de red/API no significa "no pagó", significa
+      // "no pudimos verificar". El llamador debe tratarlo distinto.
+      this.logger.warn(
+        `Error al consultar el estado de pago de la orden ${orderId} (${email}): ${axiosError.message} (HTTP ${status ?? 'desconocido'})`,
+      );
+      throw error;
     }
   }
 

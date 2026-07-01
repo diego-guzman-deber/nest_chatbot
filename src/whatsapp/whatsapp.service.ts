@@ -12,6 +12,10 @@ import { PlanesService } from '../planes/planes.service';
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
 
+  // Evita iniciar dos monitoreos de pago en paralelo para la misma orden
+  // (p. ej. si el usuario confirma la compra dos veces por error).
+  private readonly ordenesEnMonitoreo = new Set<string>();
+
   constructor(
     private readonly config: ConfigService,
     private readonly openaiService: OpenaiService,
@@ -203,13 +207,24 @@ export class WhatsappService {
     // Si se detectó el trigger de pago, iniciar el proceso de cobro
     if (match) {
       const triggerData = match[1]; // plan|monto|nit|razonSocial|email
-      const [plan, montoStr, nit, razonSocial, email] = triggerData.split('|');
+      const [plan, , nit, razonSocial, email] = triggerData.split('|');
 
-      // Resolver el itemId, monto y frecuencia del plan (consulta MongoDB, es async)
+      // Resolver el itemId, monto y frecuencia del plan contra el catálogo real
+      // (MongoDB / plan de prueba). NUNCA se debe cobrar un monto que la IA haya
+      // escrito libremente en el trigger: si el plan no existe en el catálogo,
+      // se corta el flujo de pago en vez de generar un QR con un monto no verificado.
       const planResuelto = await this.paymentService.resolverPlan(plan);
-      const monto = planResuelto?.monto ?? (parseFloat(montoStr) || 0);
-      const itemId = planResuelto?.itemId ?? 'DESCONOCIDO';
-      const frecuencia = planResuelto?.frecuencia ?? 'mensual';
+      if (!planResuelto) {
+        this.logger.error(`[${waId}] Plan no reconocido en el catálogo: "${plan}". Se aborta la generación del QR de pago.`);
+        await this.sendMessage(
+          waId,
+          'No logré identificar ese plan en nuestro catálogo actual, así que no generé el cobro para evitar un monto incorrecto. ¿Podrías confirmarme el nombre exacto del plan? También puedes escribir "ver planes" para revisar el catálogo vigente.',
+        );
+        return;
+      }
+      const monto = planResuelto.monto;
+      const itemId = planResuelto.itemId;
+      const frecuencia = planResuelto.frecuencia ?? 'mensual';
 
       // 1. Obtener o crear el contacto en EspoCRM para obtener el contactId correcto
       let contactId = waId;
@@ -224,13 +239,27 @@ export class WhatsappService {
       // 2. Generar el orderId de suscripción: wa-{contactId}-{YYYYMM}
       const orderId = this.paymentService.generarOrderId(contactId);
 
+      // 3. Tomar una "foto" del contacto ANTES de generar el QR: cSubscribed
+      // (para saber si ya era suscriptor) y modifiedAt (baseline para detectar
+      // que el registro fue tocado DESPUÉS de esta orden, ver notas en
+      // EspoContactService.consultarEstadoPagoOrden).
+      let modifiedAtBaseline: string | undefined;
+      try {
+        const contactoPrevio = await this.espoContactService.buscarContactoPorEmail(email);
+        modifiedAtBaseline = contactoPrevio?.modifiedAt;
+      } catch (err: any) {
+        this.logger.warn(
+          `[${waId}] No se pudo obtener el estado previo del contacto para ${email}: ${err.message}. Se continuará sin baseline de modifiedAt.`,
+        );
+      }
+
       this.logger.log(
         `[${waId}] 💳 Trigger de Pago QR detectado. Order: ${orderId}, Plan: ${plan} (${itemId}), Monto: ${monto} Bs, NIT: ${nit}, Razón Social: ${razonSocial}, Email: ${email}`,
       );
 
       // Pasar todos los datos para que el polling guarde el log al confirmar el pago
       this.procesarYEnviarPagoQR(
-        waId, monto, orderId, razonSocial, nit, itemId, email, plan, frecuencia, contactId,
+        waId, monto, orderId, razonSocial, nit, itemId, email, plan, frecuencia, contactId, modifiedAtBaseline,
       ).catch((err) => {
         this.logger.error(`[${waId}] Error en el procesamiento del pago QR: ${err.message}`, err.stack);
       });
@@ -259,7 +288,19 @@ export class WhatsappService {
     planNombre: string,
     frecuencia: string,
     contactIdEspocrm: string,
+    modifiedAtBaseline: string | undefined,
   ): Promise<void> {
+    // Evitar generar un segundo QR y un segundo monitoreo para la misma orden
+    // (mismo contacto + mismo mes) si el usuario confirma la compra dos veces.
+    if (this.ordenesEnMonitoreo.has(orderId)) {
+      this.logger.warn(`[${waId}] Ya existe un monitoreo activo para la orden ${orderId}. Se ignora el nuevo intento de generar QR.`);
+      await this.sendMessage(
+        waId,
+        'Ya tienes un código QR pendiente de pago para esta suscripción. Por favor usa ese mismo código; si no lo encuentras, dime y te lo reenvío.',
+      );
+      return;
+    }
+
     try {
       // 1. Obtener el QR en formato binario con los parámetros correctos de suscripciones
       const qrBuffer = await this.paymentService.obtenerQrBuffer(monto, orderId, razonSocial, nit, itemId);
@@ -271,8 +312,10 @@ export class WhatsappService {
       const caption = 'Aquí tienes tu código QR para realizar el pago de tu suscripción. Una vez pagado, se activará automáticamente.';
       await this.sendMediaMessage(waId, mediaId, caption);
 
-      // 4. Iniciar el monitoreo en segundo plano (guarda el log al confirmar el pago)
-      this.iniciarMonitoreoPago(orderId, waId, email, {
+      // 4. Iniciar el monitoreo en segundo plano (guarda el log al confirmar el pago).
+      // modifiedAtBaseline permite confirmar automáticamente también renovaciones
+      // de gente que ya estaba suscrita (ver EspoContactService.consultarEstadoPagoOrden).
+      this.iniciarMonitoreoPago(orderId, waId, email, modifiedAtBaseline, {
         planNombre, frecuencia, monto, nit, razonSocial, itemId, contactIdEspocrm,
       });
     } catch (error: any) {
@@ -348,6 +391,7 @@ export class WhatsappService {
     orderId: string,
     waId: string,
     email: string,
+    modifiedAtBaseline: string | undefined,
     datosPlan: {
       planNombre: string;
       frecuencia: string;
@@ -358,75 +402,134 @@ export class WhatsappService {
       contactIdEspocrm: string;
     },
   ): void {
+    if (this.ordenesEnMonitoreo.has(orderId)) {
+      this.logger.warn(`[${waId}] Ya hay un monitoreo activo para la orden ${orderId}, se ignora el duplicado.`);
+      return;
+    }
+    this.ordenesEnMonitoreo.add(orderId);
+
     let intentos = 0;
     const maxIntentos = 30; // 30 intentos × 30 segundos = 15 minutos
+    let erroresConsecutivos = 0;
+    const maxErroresConsecutivos = 5; // ~2.5 min de fallas seguidas de EspoCRM
+
+    const finalizar = () => {
+      clearInterval(interval);
+      this.ordenesEnMonitoreo.delete(orderId);
+    };
 
     this.logger.log(`[${waId}] Iniciando monitoreo de pago. Order: ${orderId}, Email: ${email}`);
 
     const interval = setInterval(async () => {
       intentos++;
 
+      let estado: 'confirmado' | 'pendiente' | 'sin_senal_confiable';
       try {
-        // Busca por email del usuario en EspoCRM (igual que cybersource-callback.php del Paywall)
-        const pagado = await this.espoContactService.consultarSuscripcionActiva(orderId, email);
+        // Confirma que ESTA orden fue pagada: cSubscribed=true Y (si había un
+        // baseline de modifiedAt) evidencia de que el contacto fue tocado
+        // después de generar el QR. Ver EspoContactService.consultarEstadoPagoOrden.
+        estado = await this.espoContactService.consultarEstadoPagoOrden(orderId, email, modifiedAtBaseline);
+        erroresConsecutivos = 0;
+      } catch (error: any) {
+        erroresConsecutivos++;
+        this.logger.error(
+          `[${waId}] Error consultando el pago de la orden ${orderId} (falla ${erroresConsecutivos}/${maxErroresConsecutivos}): ${error.message}`,
+        );
 
-        if (pagado) {
-          clearInterval(interval);
-          this.logger.log(`[${waId}] ✅ Pago confirmado para la suscripción ${orderId}!`);
-
-          // ── 1. Aprovisionar usuario y contraseña (compatible con Paywall) ────────
-          let contactIdReal = datosPlan.contactIdEspocrm;
-          try {
-            contactIdReal = await this.provisionarUsuario(
-              waId,
-              email,
-              datosPlan.razonSocial,
-              datosPlan.nit,
-              datosPlan.contactIdEspocrm,
-            );
-          } catch (provErr: any) {
-            this.logger.error(`[${waId}] Error al provisionar usuario/contacto: ${provErr.message}`, provErr.stack);
-          }
-
-          // ── 2. Guardar log de suscripción en MongoDB ──────────────────────
-          try {
-            await this.suscripcionesLogService.registrarPago({
-              email:            email,
-              telefono:         waId,
-              razonSocial:      datosPlan.razonSocial,
-              nit:              datosPlan.nit,
-              plan:             datosPlan.planNombre,
-              itemId:           datosPlan.itemId,
-              monto:            datosPlan.monto,
-              orderId:          orderId,
-              contactIdEspocrm: contactIdReal,
-              frecuencia:       datosPlan.frecuencia,
-            });
-          } catch (logErr: any) {
-            this.logger.error(`[${waId}] Error al guardar log de suscripción: ${logErr.message}`);
-          }
-
-          // ── 3. Asegurar activación de la suscripción (cSubscribed = 1) ───
-          try {
-            await this.espoContactService.activarSuscripcion(contactIdReal);
-          } catch (actErr: any) {
-            this.logger.error(`[${waId}] Error al asegurar la activación de la suscripción: ${actErr.message}`);
-          }
-
-          // ── 4. Notificar al usuario por WhatsApp ──────────────────────────
+        if (erroresConsecutivos >= maxErroresConsecutivos) {
+          finalizar();
+          // No le decimos al usuario que "no pagó" ni que "expiró": es un fallo
+          // técnico nuestro verificando, no una certeza sobre el estado del pago.
+          this.logger.error(
+            `[${waId}] 🚨 CRÍTICO: no se pudo verificar el pago de la orden ${orderId} (email: ${email}, monto: ${datosPlan.monto} Bs) tras ${erroresConsecutivos} fallas consecutivas de EspoCRM. Requiere revisión manual.`,
+          );
           await this.sendMessage(
             waId,
-            '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀😊',
+            'Tuvimos un problema técnico verificando tu pago. Si ya pagaste, no te preocupes: nuestro equipo revisará tu transacción manualmente y activará tu suscripción. Si tienes dudas, puedes escribirnos.',
           );
-          return;
         }
-      } catch (error: any) {
-        this.logger.error(`[${waId}] Error consultando el pago para suscripción ${orderId}: ${error.message}`);
+        return;
+      }
+
+      if (estado === 'sin_senal_confiable') {
+        // El contacto ya estaba suscrito antes de esta orden y EspoCRM no
+        // devolvió modifiedAt para comparar: no hay forma segura de saber si
+        // ESTA orden fue pagada. En vez de auto-confirmar a ciegas, se corta
+        // el monitoreo y se deriva a revisión manual del equipo.
+        finalizar();
+        this.logger.warn(
+          `[${waId}] ⚠️ ACCIÓN MANUAL REQUERIDA: no se pudo confirmar automáticamente el pago de la orden ${orderId} (email: ${email}, plan: ${datosPlan.itemId}, monto: ${datosPlan.monto} Bs, NIT: ${datosPlan.nit}, Razón Social: ${datosPlan.razonSocial}). El contacto ya estaba suscrito y EspoCRM no devolvió modifiedAt. El equipo debe verificar el pago en el panel del banco/QR y activar manualmente si corresponde.`,
+        );
+        await this.sendMessage(
+          waId,
+          'Vemos que ya cuentas con una suscripción vigente. Para este caso, un asesor verificará tu pago manualmente y te confirmaremos apenas quede procesado. Gracias por tu paciencia.',
+        );
+        return;
+      }
+
+      if (estado === 'confirmado') {
+        finalizar();
+        this.logger.log(`[${waId}] ✅ Pago confirmado por el banco para la orden ${orderId}!`);
+
+        // ── 1. Aprovisionar usuario y contraseña (compatible con Paywall) ────────
+        let contactIdReal = datosPlan.contactIdEspocrm;
+        try {
+          contactIdReal = await this.provisionarUsuario(
+            waId,
+            email,
+            datosPlan.razonSocial,
+            datosPlan.nit,
+            datosPlan.contactIdEspocrm,
+          );
+        } catch (provErr: any) {
+          this.logger.error(`[${waId}] Error al provisionar usuario/contacto: ${provErr.message}`, provErr.stack);
+        }
+
+        // ── 2. Guardar log de suscripción en MongoDB ──────────────────────
+        try {
+          await this.suscripcionesLogService.registrarPago({
+            email:            email,
+            telefono:         waId,
+            razonSocial:      datosPlan.razonSocial,
+            nit:              datosPlan.nit,
+            plan:             datosPlan.planNombre,
+            itemId:           datosPlan.itemId,
+            monto:            datosPlan.monto,
+            orderId:          orderId,
+            contactIdEspocrm: contactIdReal,
+            frecuencia:       datosPlan.frecuencia,
+          });
+        } catch (logErr: any) {
+          this.logger.error(
+            `[${waId}] 🚨 CRÍTICO: pago de la orden ${orderId} confirmado pero falló el registro del log de suscripción: ${logErr.message}. Requiere revisión manual para no perder el registro del cobro.`,
+          );
+        }
+
+        // ── 3. Asegurar activación de la suscripción (cSubscribed = 1) ───
+        try {
+          await this.espoContactService.activarSuscripcion(contactIdReal);
+        } catch (actErr: any) {
+          this.logger.error(
+            `[${waId}] 🚨 CRÍTICO: pago de la orden ${orderId} confirmado pero falló la activación en EspoCRM (contacto ${contactIdReal}): ${actErr.message}. El usuario pagó pero puede no tener acceso: requiere revisión manual.`,
+          );
+        }
+
+        // ── 4. Notificar al usuario por WhatsApp ──────────────────────────
+        const notificado = await this.sendMessage(
+          waId,
+          '¡Excelente! 🎉 Hemos verificado tu pago por QR de forma exitosa. Tu suscripción a El Deber ha sido activada correctamente. ¡Muchas gracias por confiar en nosotros! 🚀',
+        );
+        if (!notificado) {
+          this.logger.error(
+            `[${waId}] 🚨 CRÍTICO: el pago de la orden ${orderId} fue confirmado y activado, pero no se pudo notificar al usuario por WhatsApp. Requiere seguimiento manual.`,
+          );
+        }
+        return;
       }
 
       if (intentos >= maxIntentos) {
-        clearInterval(interval);
-        this.logger.warn(`[${waId}] Monitoreo expirado para la suscripción ${orderId}.`);
+        finalizar();
+        this.logger.warn(`[${waId}] Monitoreo expirado sin confirmación de pago para la orden ${orderId}.`);
         await this.sendMessage(
           waId,
           'El tiempo límite (15 minutos) para realizar el pago de tu código QR ha expirado. Si aún deseas adquirir la suscripción, por favor solicítame una nueva cotización.',
@@ -528,14 +631,13 @@ export class WhatsappService {
 
   // ── Envío de mensaje a la API de Meta ───────────────────────────────────────
 
-  private async sendMessage(waId: string, text: string): Promise<void> {
+  // Retorna true si el mensaje se envió correctamente. Los llamadores que
+  // notifican eventos críticos de dinero (pago confirmado, activación) deben
+  // revisar este resultado para poder alertar si el usuario nunca se enteró.
+  private async sendMessage(waId: string, text: string): Promise<boolean> {
     const version = this.config.get<string>('VERSION') ?? 'v25.0';
     const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
     const accessToken = this.config.get<string>('ACCESS_TOKEN');
-
-    // Log de configuración para verificar que las env vars están cargadas
-    this.logger.log(`Usando PHONE_NUMBER_ID: ${phoneNumberId ?? '⚠️ NO DEFINIDO'}`);
-    this.logger.log(`ACCESS_TOKEN presente: ${accessToken ? '✅ Sí' : '⚠️ NO'}`);
 
     const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 
@@ -558,10 +660,12 @@ export class WhatsappService {
         },
       });
       this.logger.log(`[${waId}] ✅ Mensaje enviado. Status: ${res.status}`);
+      return true;
     } catch (error: any) {
       const detail = error?.response?.data ?? error?.message;
       this.logger.error(`[${waId}] ❌ Error al enviar mensaje: ${JSON.stringify(detail)}`);
       this.logger.error(`URL usada: ${url}`);
+      return false;
     }
   }
 
