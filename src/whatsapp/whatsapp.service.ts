@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OpenaiService } from './openai.service';
 import { PaymentService } from './payment.service';
+import { WhatsappSenderService } from './whatsapp-sender.service';
 import { EspoContactService } from '../espocrm/espo-contact.service';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 import { MailService } from '../mail/mail.service';
@@ -22,6 +23,7 @@ export class WhatsappService {
     private readonly paymentService: PaymentService,
     private readonly espoContactService: EspoContactService,
     private readonly suscripcionesLogService: SuscripcionesLogService,
+    private readonly whatsappSenderService: WhatsappSenderService,
     private readonly mailService: MailService,
     private readonly planesService: PlanesService,
   ) {}
@@ -634,39 +636,9 @@ export class WhatsappService {
   // Retorna true si el mensaje se envió correctamente. Los llamadores que
   // notifican eventos críticos de dinero (pago confirmado, activación) deben
   // revisar este resultado para poder alertar si el usuario nunca se enteró.
+  // Delega en WhatsappSenderService (compartido con RecordatoriosService).
   private async sendMessage(waId: string, text: string): Promise<boolean> {
-    const version = this.config.get<string>('VERSION') ?? 'v25.0';
-    const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
-    const accessToken = this.config.get<string>('ACCESS_TOKEN');
-
-    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
-
-    const data = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: waId,
-      type: 'text',
-      text: {
-        preview_url: false,
-        body: text,
-      },
-    };
-
-    try {
-      const res = await axios.post(url, data, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      this.logger.log(`[${waId}] ✅ Mensaje enviado. Status: ${res.status}`);
-      return true;
-    } catch (error: any) {
-      const detail = error?.response?.data ?? error?.message;
-      this.logger.error(`[${waId}] ❌ Error al enviar mensaje: ${JSON.stringify(detail)}`);
-      this.logger.error(`URL usada: ${url}`);
-      return false;
-    }
+    return this.whatsappSenderService.enviarMensaje(waId, text);
   }
 
   // ── Enviar Menú Interactivo (List Reply) a Meta ──────────────────────────────

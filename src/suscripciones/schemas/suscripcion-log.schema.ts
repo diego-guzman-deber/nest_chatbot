@@ -65,6 +65,14 @@ export class SuscripcionLog {
   /** Fuente del pago — siempre "chatbot-whatsapp" para trazabilidad */
   @Prop({ default: 'chatbot-whatsapp' })
   fuente: string;
+
+  /** Evita reenviar el recordatorio de vencimiento más de una vez por suscripción */
+  @Prop({ default: false })
+  recordatorioVencimientoEnviado: boolean;
+
+  /** Fecha en la que se envió el recordatorio de vencimiento (auditoría) */
+  @Prop({ type: Date, default: null })
+  recordatorioVencimientoEnviadoEn: Date | null;
 }
 
 export const SuscripcionLogSchema = SchemaFactory.createForClass(SuscripcionLog);

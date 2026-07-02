@@ -77,6 +77,38 @@ export class SuscripcionesLogService {
   }
 
   /**
+   * Busca suscripciones activas cuya fechaFin cae dentro de los próximos `diasAntes`
+   * días (ventana [ahora, ahora + diasAntes]) y que todavía no recibieron el
+   * recordatorio de vencimiento. La ventana (en vez de un solo día exacto) hace
+   * que, si un envío falla o el cron no corrió un día, se reintente automáticamente
+   * al día siguiente mientras la suscripción siga sin vencer.
+   */
+  async buscarProximasAVencerSinRecordatorio(diasAntes: number): Promise<SuscripcionLogDocument[]> {
+    const ahora = new Date();
+    const limite = new Date(ahora);
+    limite.setDate(limite.getDate() + diasAntes);
+
+    return this.suscripcionLogModel
+      .find({
+        activa: true,
+        recordatorioVencimientoEnviado: { $ne: true },
+        fechaFin: { $gte: ahora, $lte: limite },
+      })
+      .exec();
+  }
+
+  /**
+   * Marca una suscripción como "recordatorio de vencimiento ya enviado" para
+   * no volver a notificar al usuario en corridas futuras del cron.
+   */
+  async marcarRecordatorioVencimientoEnviado(id: string): Promise<void> {
+    await this.suscripcionLogModel.updateOne(
+      { _id: id },
+      { $set: { recordatorioVencimientoEnviado: true, recordatorioVencimientoEnviadoEn: new Date() } },
+    ).exec();
+  }
+
+  /**
    * Calcula la fecha de fin sumando los meses/días según la frecuencia del plan.
    */
   private calcularFechaFin(desde: Date, frecuencia?: string): Date | null {
