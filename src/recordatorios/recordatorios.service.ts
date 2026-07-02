@@ -28,9 +28,9 @@ export class RecordatoriosService {
     private readonly config: ConfigService,
   ) {}
 
-  // TEMPORAL para prueba en producción: 12:15 hora Bolivia. Volver a
+  // TEMPORAL para prueba en producción: 12:50 hora Bolivia. Volver a
   // CronExpression.EVERY_DAY_AT_9AM ('0 9 * * *') después de probar.
-  @Cron('15 12 * * *', { timeZone: 'America/La_Paz' })
+  @Cron('50 12 * * *', { timeZone: 'America/La_Paz' })
   async enviarRecordatoriosDeVencimiento(): Promise<void> {
     this.logger.log('Iniciando revisión diaria de suscripciones próximas a vencer...');
 
