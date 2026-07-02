@@ -83,7 +83,14 @@ export class WhatsappService {
 
     const waId: string = value.contacts?.[0]?.wa_id ?? message.from;
     const name: string = value.contacts?.[0]?.profile?.name ?? 'Usuario';
-    
+
+    // Marcar como leído y mostrar "escribiendo..." mientras procesamos la
+    // respuesta (sobre todo la llamada a OpenAI, que es la que más tarda).
+    // No se espera el resultado: si falla, no debe bloquear el flujo normal.
+    if (message.id) {
+      this.whatsappSenderService.mostrarEscribiendo(message.id).catch(() => {});
+    }
+
     let messageBody = '';
     if (message.type === 'text') {
       messageBody = message.text?.body ?? '';

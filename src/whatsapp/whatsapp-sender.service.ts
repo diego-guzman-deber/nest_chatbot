@@ -54,4 +54,44 @@ export class WhatsappSenderService {
       return false;
     }
   }
+
+  /**
+   * Marca un mensaje entrante como leído y muestra el indicador de
+   * "escribiendo..." en el chat del usuario. Meta lo apaga automáticamente
+   * a los 25 segundos, o antes si le respondemos con un mensaje normal — por
+   * eso conviene llamarlo justo al recibir el webhook, antes de procesar
+   * (p. ej. antes de llamar a OpenAI), y no hace falta "apagarlo" a mano.
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/typing-indicators
+   */
+  async mostrarEscribiendo(messageId: string): Promise<boolean> {
+    const version = this.config.get<string>('VERSION') ?? 'v25.0';
+    const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
+    const accessToken = this.config.get<string>('ACCESS_TOKEN');
+
+    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+
+    const data = {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+      typing_indicator: {
+        type: 'text',
+      },
+    };
+
+    try {
+      await axios.post(url, data, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      return true;
+    } catch (error: any) {
+      const detail = error?.response?.data ?? error?.message;
+      // No es crítico: si falla, el usuario simplemente no ve el "escribiendo...".
+      this.logger.warn(`No se pudo activar el indicador de escribiendo para ${messageId}: ${JSON.stringify(detail)}`);
+      return false;
+    }
+  }
 }
