@@ -94,4 +94,66 @@ export class WhatsappSenderService {
       return false;
     }
   }
+
+  /**
+   * Envía un mensaje de PLANTILLA (template) previamente aprobado por Meta.
+   *
+   * Es obligatorio para mensajes proactivos (que el negocio inicia sin que el
+   * usuario haya escrito en las últimas 24h, p. ej. recordatorios de
+   * vencimiento) — un mensaje de texto libre (`enviarMensaje`) fallará con el
+   * error 131047 fuera de esa ventana de 24 horas.
+   *
+   * La plantilla debe existir y estar APROBADA en WhatsApp Manager / Meta
+   * Business Suite antes de poder usarse acá.
+   *
+   * @param templateName Nombre exacto de la plantilla aprobada.
+   * @param languageCode Código de idioma configurado en la plantilla (ej. "es").
+   * @param parametrosBody Valores en orden para las variables {{1}}, {{2}}, ... del body.
+   */
+  async enviarPlantilla(
+    waId: string,
+    templateName: string,
+    languageCode: string,
+    parametrosBody: string[] = [],
+  ): Promise<boolean> {
+    const version = this.config.get<string>('VERSION') ?? 'v25.0';
+    const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
+    const accessToken = this.config.get<string>('ACCESS_TOKEN');
+
+    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+
+    const data = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: waId,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        ...(parametrosBody.length > 0 && {
+          components: [
+            {
+              type: 'body',
+              parameters: parametrosBody.map((texto) => ({ type: 'text', text: texto })),
+            },
+          ],
+        }),
+      },
+    };
+
+    try {
+      const res = await axios.post(url, data, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      this.logger.log(`[${waId}] ✅ Plantilla "${templateName}" enviada. Status: ${res.status}`);
+      return true;
+    } catch (error: any) {
+      const detail = error?.response?.data ?? error?.message;
+      this.logger.error(`[${waId}] ❌ Error al enviar plantilla "${templateName}": ${JSON.stringify(detail)}`);
+      return false;
+    }
+  }
 }

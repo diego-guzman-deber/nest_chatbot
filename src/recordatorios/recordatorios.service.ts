@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
@@ -24,11 +25,12 @@ export class RecordatoriosService {
   constructor(
     private readonly suscripcionesLogService: SuscripcionesLogService,
     private readonly whatsappSenderService: WhatsappSenderService,
+    private readonly config: ConfigService,
   ) {}
 
-  // TEMPORAL para prueba en producción: 11:00 hora Bolivia. Volver a
+  // TEMPORAL para prueba en producción: 12:10 hora Bolivia. Volver a
   // CronExpression.EVERY_DAY_AT_9AM ('0 9 * * *') después de probar.
-  @Cron('0 11 * * *', { timeZone: 'America/La_Paz' })
+  @Cron('10 12 * * *', { timeZone: 'America/La_Paz' })
   async enviarRecordatoriosDeVencimiento(): Promise<void> {
     this.logger.log('Iniciando revisión diaria de suscripciones próximas a vencer...');
 
@@ -47,6 +49,12 @@ export class RecordatoriosService {
 
     this.logger.log(`Se encontraron ${candidatas.length} suscripción(es) para recordar.`);
 
+    // Nombre e idioma de la plantilla aprobada en WhatsApp Manager / Meta
+    // Business Suite. Fuera de la ventana de 24h, un mensaje de texto libre
+    // (enviarMensaje) falla con el error 131047 — hay que usar plantilla.
+    const templateName = this.config.get<string>('WHATSAPP_TEMPLATE_RECORDATORIO_NAME') ?? 'recordatorio_vencimiento_suscripcion';
+    const templateLang = this.config.get<string>('WHATSAPP_TEMPLATE_RECORDATORIO_LANG') ?? 'es';
+
     for (const suscripcion of candidatas) {
       const telefono = suscripcion.telefono;
       const fechaFin = suscripcion.fechaFin;
@@ -63,12 +71,14 @@ export class RecordatoriosService {
         year: 'numeric',
       });
 
-      const mensaje =
-        `Hola! 👋 Tu suscripción *${suscripcion.plan}* de El Deber vence el *${fechaTexto}*.\n\n` +
-        `Para que no pierdas el acceso, escríbenos por este mismo chat cuando quieras renovarla.`;
-
       try {
-        const enviado = await this.whatsappSenderService.enviarMensaje(telefono, mensaje);
+        // La plantilla debe tener dos variables en el body: {{1}} = plan, {{2}} = fecha.
+        const enviado = await this.whatsappSenderService.enviarPlantilla(
+          telefono,
+          templateName,
+          templateLang,
+          [suscripcion.plan, fechaTexto],
+        );
         if (!enviado) {
           this.logger.warn(`No se pudo enviar el recordatorio a ${telefono} (orden ${suscripcion.orderId}). Se reintentará en la próxima corrida.`);
           continue;
