@@ -514,6 +514,35 @@ export class WhatsappService {
           );
         }
 
+        // ── 2b. Registrar la suscripción en EspoCRM (entidad CSuscripcion) ───
+        // Vincula el contacto con el plan comprado y su fechaFin — es el mismo
+        // registro que el equipo de El Deber crea a mano desde el panel
+        // "Suscripciones" para los clientes de otros canales.
+        try {
+          const ahora = new Date();
+          const fechaFin = this.suscripcionesLogService.calcularFechaFin(ahora, datosPlan.frecuencia);
+          // El campo 'paquete' de CSuscripcion es un enum en EspoCRM y no incluye
+          // el plan de prueba 'ChatbotSus'; esas compras se registran como
+          // EPAPER MENSUAL (epaper01) dejando constancia del plan real en la descripción.
+          const esPrueba = datosPlan.itemId === 'ChatbotSus';
+          await this.espoContactService.crearSuscripcion({
+            contactId:   contactIdReal,
+            razonSocial: datosPlan.razonSocial,
+            nit:         datosPlan.nit,
+            paquete:     esPrueba ? 'epaper01' : datosPlan.itemId,
+            monto:       datosPlan.monto,
+            fechaInicio: ahora,
+            fechaFin:    fechaFin,
+            fechaPago:   ahora,
+            metodoPago:  'QR',
+            descripcion: esPrueba ? `Plan Prueba (ChatbotSus) — orden ${orderId}` : `Orden ${orderId}`,
+          });
+        } catch (susErr: any) {
+          this.logger.error(
+            `[${waId}] 🚨 CRÍTICO: pago de la orden ${orderId} confirmado pero falló la creación del registro CSuscripcion en EspoCRM (contacto ${contactIdReal}, plan ${datosPlan.itemId}): ${susErr.message}. El equipo debe crear la suscripción manualmente en el panel.`,
+          );
+        }
+
         // ── 3. Asegurar activación de la suscripción (cSubscribed = 1) ───
         try {
           await this.espoContactService.activarSuscripcion(contactIdReal);

@@ -312,6 +312,69 @@ export class EspoContactService {
   }
 
   /**
+   * Crea un registro de suscripción en la entidad CSuscripcion de EspoCRM,
+   * vinculando el contacto con el plan comprado. Esta entidad es la que usa
+   * el equipo de El Deber para administrar los planes y sus vencimientos
+   * (fechaFin) — es el mismo registro que crean manualmente desde el panel
+   * "Suscripciones" (admin.eldeber.bo). Retorna el ID del registro creado.
+   */
+  async crearSuscripcion(datos: {
+    contactId: string;
+    razonSocial: string;
+    nit: string;
+    paquete: string;      // itemId del plan; debe ser una opción del enum 'paquete' de EspoCRM
+    monto: number;        // en Bs
+    fechaInicio: Date;
+    fechaFin: Date | null;
+    fechaPago: Date;
+    metodoPago?: string;
+    descripcion?: string;
+  }): Promise<string> {
+    const url = `${this.baseUrl}/CSuscripcion`;
+
+    // EspoCRM espera fechas 'YYYY-MM-DD'; usamos la fecha local de Bolivia
+    // para evitar que un pago cerca de medianoche quede con el día corrido.
+    const fmt = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/La_Paz' });
+
+    const payload = {
+      name:         datos.razonSocial,
+      contactId:    datos.contactId,
+      nit:          datos.nit,
+      paquete:      datos.paquete,
+      precio:       datos.monto,
+      monto:        datos.monto,
+      fechaInicio:  fmt(datos.fechaInicio),
+      fechaFin:     datos.fechaFin ? fmt(datos.fechaFin) : null,
+      fechaPago:    fmt(datos.fechaPago),
+      metodoPago:   datos.metodoPago ?? 'QR',
+      facturado:    false,
+      // Marca que la venta se originó en el chatbot de WhatsApp, para que el
+      // equipo pueda distinguirlas de las creadas a mano o por otros canales.
+      chatbot:      true,
+      description:  datos.descripcion ?? null,
+    };
+
+    try {
+      this.logger.log(
+        `Creando CSuscripcion en EspoCRM: contacto=${datos.contactId}, paquete=${datos.paquete}, monto=${datos.monto} Bs, fechaFin=${payload.fechaFin}`,
+      );
+
+      const res = await axios.post(url, payload, { headers: this.headers });
+
+      const suscripcionId: string = res.data.id;
+      this.logger.log(`✅ CSuscripcion creada en EspoCRM con ID: ${suscripcionId}`);
+      return suscripcionId;
+    } catch (error: any) {
+      const detail = error?.response?.data ?? error?.message;
+      this.logger.error(
+        `Error al crear CSuscripcion para contacto ${datos.contactId}: ${JSON.stringify(detail)}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Actualiza la contraseña cifrada (cPassword) de un contacto existente.
    */
   async actualizarPassword(contactId: string, contraseniaCifrada: string): Promise<void> {

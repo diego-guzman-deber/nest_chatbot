@@ -110,8 +110,9 @@ export class SuscripcionesLogService {
 
   /**
    * Calcula la fecha de fin sumando los meses/días según la frecuencia del plan.
+   * Público porque también se usa para crear el registro CSuscripcion en EspoCRM.
    */
-  private calcularFechaFin(desde: Date, frecuencia?: string): Date | null {
+  calcularFechaFin(desde: Date, frecuencia?: string): Date | null {
     const fecha = new Date(desde);
 
     switch (frecuencia?.toLowerCase()) {
