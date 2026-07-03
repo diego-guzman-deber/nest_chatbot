@@ -1,4 +1,4 @@
-import { Controller, ForbiddenException, Post, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Post, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LegacyVencidosCampanaService } from './legacy-vencidos-campana.service';
 
@@ -17,6 +17,12 @@ export class LegacyVencidosController {
     private readonly campanaService: LegacyVencidosCampanaService,
     private readonly config: ConfigService,
   ) {}
+
+  // GET para poder abrirlo directo desde el navegador (pegando el link).
+  @Get('sembrar')
+  async sembrarPorNavegador(@Query('token') token: string) {
+    return this.sembrar(token);
+  }
 
   @Post('sembrar')
   async sembrar(@Query('token') token: string) {
