@@ -31,9 +31,9 @@ export class ExpiracionService {
 
   // Corre dos veces al día (9:00 am y 9:00 pm hora Bolivia) para no dejar a
   // nadie con acceso de más muchas horas después de vencer.
-  // TEMPORAL para prueba en producción: 10:00 am hora Bolivia. Volver a
+  // TEMPORAL para prueba en producción: 9:53 am hora Bolivia. Volver a
   // '0 9,21 * * *' después de probar con la suscripción de Fernando.
-  @Cron('45 9 * * *', { timeZone: 'America/La_Paz' })
+  @Cron('53 9 * * *', { timeZone: 'America/La_Paz' })
   async desactivarSuscripcionesVencidas(): Promise<void> {
     this.logger.log('Iniciando revisión diaria de suscripciones vencidas...');
 
@@ -68,11 +68,13 @@ export class ExpiracionService {
         const ahora = new Date();
 
         if (ultimaFechaFin && ultimaFechaFin.getTime() > ahora.getTime()) {
-          // Se renovó (la vigencia más reciente en EspoCRM sigue vigente) —
-          // no desactivamos; solo actualizamos el registro local para que
-          // deje de aparecer como "vencida" en corridas futuras.
-          this.logger.log(`Contacto ${contactId} ya tiene una renovación vigente hasta ${ultimaFechaFin.toISOString().split('T')[0]}, no se desactiva.`);
-          await this.suscripcionesLogService.marcarInactiva(suscripcion.id);
+          // Todavía vigente en EspoCRM en este instante — puede ser que aún no
+          // haya pasado el "fin del día" de su propia fecha, o que haya una
+          // renovación real más adelante. En NINGÚN caso se marca inactivo
+          // acá: eso sacaría al registro para siempre de buscarActivasVencidas()
+          // aunque no haya sido realmente desactivado. Se vuelve a evaluar en
+          // la próxima corrida del cron.
+          this.logger.log(`Contacto ${contactId} aún vigente en EspoCRM hasta ${ultimaFechaFin.toISOString().split('T')[0]}, se reevaluará en la próxima corrida.`);
           continue;
         }
 
