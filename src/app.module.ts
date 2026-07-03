@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { PlanesModule } from './planes/planes.module';
 import { RecordatoriosModule } from './recordatorios/recordatorios.module';
+import { LegacyVencidosModule } from './legacy-vencidos/legacy-vencidos.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RecordatoriosModule } from './recordatorios/recordatorios.module';
     PlanesModule,
     WhatsappModule,
     RecordatoriosModule,
+    LegacyVencidosModule,
   ],
   controllers: [AppController],
   providers: [AppService],

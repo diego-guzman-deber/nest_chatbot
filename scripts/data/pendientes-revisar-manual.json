@@ -1,0 +1,146 @@
+[
+  {
+    "csuscripcionId": "690a8d4f91c24b72f",
+    "razonSocial": "MARICRUZ ZALLES",
+    "paquete": "epaper01",
+    "fechaFin": "2025-12-04",
+    "contactId": "6905041878f98dfe1",
+    "nombreContacto": "Maricruz Zalles",
+    "telefono": null,
+    "email": "maricruzzallesiturri@gmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "690a18576db350078",
+    "razonSocial": "DOUGLAS CABRERA",
+    "paquete": "epaper01",
+    "fechaFin": "2025-12-03",
+    "contactId": "6904a76c546816d00",
+    "nombreContacto": "Douglas Cabrera",
+    "telefono": null,
+    "email": "cabreradouglas533@gmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "68c8171526c82940d",
+    "razonSocial": "GARY TALAVERA",
+    "paquete": "epaper01",
+    "fechaFin": "2025-10-14",
+    "contactId": "68c6996da6ef2baa9",
+    "nombreContacto": "Gary Talavera",
+    "telefono": null,
+    "email": "talaveragary@gmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "68c32631e8b0a54d7",
+    "razonSocial": "ALISON MOSCOSO",
+    "paquete": "SD01",
+    "fechaFin": "2025-10-10",
+    "contactId": "68c31f1d57fc78151",
+    "nombreContacto": "Alison Moscoso",
+    "telefono": null,
+    "email": "alisoncm97@gmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "6892a4077648e9340",
+    "razonSocial": "CONSULADO DE CHILE",
+    "paquete": "Impreso1ADV",
+    "fechaFin": "2025-12-31",
+    "contactId": "687797521d79dff34",
+    "nombreContacto": "MIGUEL CONCHA ROBLE",
+    "telefono": null,
+    "email": "jmconcha@minrel.gob.cl",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": [
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE",
+        "telefono": "63145756",
+        "cif": "99001"
+      },
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE SANTA CRUZ",
+        "telefono": "69157428",
+        "cif": "99001"
+      },
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE - SANTA CRUZ",
+        "telefono": "69157428",
+        "cif": "99001"
+      }
+    ]
+  },
+  {
+    "csuscripcionId": "6882609e3f90d33ff",
+    "razonSocial": "PARTICULAR",
+    "paquete": "Impreso1DV",
+    "fechaFin": "2025-12-11",
+    "contactId": "68779752676453410",
+    "nombreContacto": "GIMENEZ",
+    "telefono": null,
+    "email": "enrique.gimenez.2023@gmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "68825d00d9991bf56",
+    "razonSocial": "PARTICULAR",
+    "paquete": "Impreso1DV",
+    "fechaFin": "2025-10-07",
+    "contactId": "687797527e90364f4",
+    "nombreContacto": "NOGALES",
+    "telefono": null,
+    "email": "carlos.nogales@hotmail.com",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": []
+  },
+  {
+    "csuscripcionId": "68825bad08b7b33dc",
+    "razonSocial": "CONSULADO DE CHILE",
+    "paquete": "Impreso1DV",
+    "fechaFin": "2025-12-06",
+    "contactId": "6877975289840cfec",
+    "nombreContacto": "ANTONIO RIVERA GONZALEZ",
+    "telefono": null,
+    "email": "rrivera@minrel.gob.cl",
+    "cSubscribed": "1",
+    "fuenteTelefono": null,
+    "revisarManual": true,
+    "candidatos": [
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE",
+        "telefono": "63145756",
+        "cif": "99001"
+      },
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE SANTA CRUZ",
+        "telefono": "69157428",
+        "cif": "99001"
+      },
+      {
+        "nombre": "CONSULADO GENERAL DE CHILE - SANTA CRUZ",
+        "telefono": "69157428",
+        "cif": "99001"
+      }
+    ]
+  }
+]
