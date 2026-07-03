@@ -494,7 +494,23 @@ export class WhatsappService {
           this.logger.error(`[${waId}] Error al provisionar usuario/contacto: ${provErr.message}`, provErr.stack);
         }
 
-        // ── 2. Guardar log de suscripción en MongoDB ──────────────────────
+        // ── 2. Calcular la vigencia del nuevo período ─────────────────────
+        // Si el contacto todavía tiene una suscripción vigente en CSuscripcion
+        // (renovación anticipada), el nuevo período empieza cuando termina el
+        // actual — no el día del pago — para no quitarle los días ya pagados.
+        // Ej: vence el 26/07 y renueva el 20/07 → nueva vigencia 26/07 a 26/08.
+        const ahora = new Date();
+        let inicioVigencia = ahora;
+        const ultimaFechaFin = await this.espoContactService.obtenerUltimaFechaFin(contactIdReal);
+        if (ultimaFechaFin && ultimaFechaFin.getTime() > ahora.getTime()) {
+          inicioVigencia = ultimaFechaFin;
+          this.logger.log(
+            `[${waId}] Renovación anticipada: la vigencia actual termina el ${ultimaFechaFin.toISOString().split('T')[0]}, el nuevo período se encadena desde esa fecha.`,
+          );
+        }
+        const finVigencia = this.suscripcionesLogService.calcularFechaFin(inicioVigencia, datosPlan.frecuencia);
+
+        // ── 2a. Guardar log de suscripción en MongoDB ─────────────────────
         try {
           await this.suscripcionesLogService.registrarPago({
             email:            email,
@@ -507,6 +523,8 @@ export class WhatsappService {
             orderId:          orderId,
             contactIdEspocrm: contactIdReal,
             frecuencia:       datosPlan.frecuencia,
+            fechaInicio:      inicioVigencia,
+            fechaFin:         finVigencia,
           });
         } catch (logErr: any) {
           this.logger.error(
@@ -519,8 +537,6 @@ export class WhatsappService {
         // registro que el equipo de El Deber crea a mano desde el panel
         // "Suscripciones" para los clientes de otros canales.
         try {
-          const ahora = new Date();
-          const fechaFin = this.suscripcionesLogService.calcularFechaFin(ahora, datosPlan.frecuencia);
           // El campo 'paquete' de CSuscripcion es un enum en EspoCRM y no incluye
           // el plan de prueba 'ChatbotSus'; esas compras se registran como
           // EPAPER MENSUAL (epaper01) dejando constancia del plan real en la descripción.
@@ -531,15 +547,15 @@ export class WhatsappService {
             nit:         datosPlan.nit,
             paquete:     esPrueba ? 'epaper01' : datosPlan.itemId,
             monto:       datosPlan.monto,
-            fechaInicio: ahora,
-            fechaFin:    fechaFin,
+            fechaInicio: inicioVigencia,
+            fechaFin:    finVigencia,
             fechaPago:   ahora,
             metodoPago:  'QR',
             descripcion: esPrueba ? `Plan Prueba (ChatbotSus) — orden ${orderId}` : `Orden ${orderId}`,
           });
         } catch (susErr: any) {
           this.logger.error(
-            `[${waId}] 🚨 CRÍTICO: pago de la orden ${orderId} confirmado pero falló la creación del registro CSuscripcion en EspoCRM (contacto ${contactIdReal}, plan ${datosPlan.itemId}): ${susErr.message}. El equipo debe crear la suscripción manualmente en el panel.`,
+            `[${waId}] 🚨 CRÍTICO: pago de la orden ${orderId} confirmado pero falló la creación del registro CSuscripcion en EspoCRM (contacto ${contactIdReal}, plan ${datosPlan.itemId}): ${susErr.message}. El equipo debe crear la suscripción manualmente en el panel (vigencia: ${inicioVigencia.toISOString().split('T')[0]} → ${finVigencia ? finVigencia.toISOString().split('T')[0] : 'N/A'}).`,
           );
         }
 

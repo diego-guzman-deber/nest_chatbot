@@ -16,6 +16,14 @@ export interface RegistrarPagoDto {
   contactIdEspocrm: string;
   /** Frecuencia del plan: 'mensual' | 'trimestral' | 'semestral' | 'anual' | 'unico' */
   frecuencia?: string;
+  /**
+   * Inicio de la vigencia. Por defecto es la fecha del pago, pero en una
+   * renovación anticipada debe ser la fechaFin de la vigencia anterior
+   * (para no quitarle al usuario los días que ya tenía pagados).
+   */
+  fechaInicio?: Date;
+  /** Fin de la vigencia. Si no se pasa, se calcula desde fechaInicio + frecuencia. */
+  fechaFin?: Date | null;
 }
 
 @Injectable()
@@ -33,7 +41,8 @@ export class SuscripcionesLogService {
    */
   async registrarPago(dto: RegistrarPagoDto): Promise<SuscripcionLogDocument> {
     const ahora = new Date();
-    const fechaFin = this.calcularFechaFin(ahora, dto.frecuencia);
+    const fechaInicio = dto.fechaInicio ?? ahora;
+    const fechaFin = dto.fechaFin !== undefined ? dto.fechaFin : this.calcularFechaFin(fechaInicio, dto.frecuencia);
 
     const log = new this.suscripcionLogModel({
       email:            dto.email,
@@ -46,7 +55,7 @@ export class SuscripcionesLogService {
       orderId:          dto.orderId,
       contactIdEspocrm: dto.contactIdEspocrm,
       fechaPago:        ahora,
-      fechaInicio:      ahora,
+      fechaInicio:      fechaInicio,
       fechaFin:         fechaFin,
       activa:           true,
       fuente:           'chatbot-whatsapp',
@@ -106,6 +115,25 @@ export class SuscripcionesLogService {
       { _id: id },
       { $set: { recordatorioVencimientoEnviado: true, recordatorioVencimientoEnviadoEn: new Date() } },
     ).exec();
+  }
+
+  /**
+   * Busca suscripciones marcadas como activas cuya fechaFin ya pasó.
+   * Son candidatas a desactivación (ver ExpiracionService) — el llamador debe
+   * confirmar contra EspoCRM que no hubo una renovación antes de apagarlas.
+   */
+  async buscarActivasVencidas(): Promise<SuscripcionLogDocument[]> {
+    return this.suscripcionLogModel
+      .find({ activa: true, fechaFin: { $lt: new Date() } })
+      .exec();
+  }
+
+  /**
+   * Marca una suscripción del log como inactiva (venció y no se renovó, o
+   * fue reemplazada por un registro más nuevo).
+   */
+  async marcarInactiva(id: string): Promise<void> {
+    await this.suscripcionLogModel.updateOne({ _id: id }, { $set: { activa: false } }).exec();
   }
 
   /**

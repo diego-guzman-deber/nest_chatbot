@@ -312,6 +312,79 @@ export class EspoContactService {
   }
 
   /**
+   * Desactiva la suscripción de un contacto en EspoCRM (cSubscribed = 0).
+   *
+   * Se usa cuando venció la vigencia (CSuscripcion.fechaFin) y no hubo
+   * renovación — ver ExpiracionService. Antes de llamar esto, el llamador
+   * debe haber confirmado con obtenerUltimaFechaFin() que no hay una
+   * vigencia futura para este contacto (si no, se cortaría el acceso a
+   * alguien que sí renovó).
+   */
+  async desactivarSuscripcion(contactId: string): Promise<void> {
+    const url = `${this.baseUrl}/Contact/${contactId}`;
+
+    try {
+      this.logger.log(`Desactivando suscripción en EspoCRM para contacto ID: ${contactId}`);
+
+      await axios.put(
+        url,
+        { cSubscribed: 0 },
+        { headers: this.headers },
+      );
+
+      this.logger.log(`✅ Suscripción desactivada en EspoCRM para contacto ID: ${contactId}`);
+    } catch (error: any) {
+      this.logger.error(
+        `Error al desactivar suscripción en EspoCRM para contacto ID ${contactId}: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Obtiene la fecha de fin más lejana entre las suscripciones (CSuscripcion)
+   * de un contacto, o null si no tiene ninguna con fechaFin.
+   *
+   * Se usa para las renovaciones: si el contacto todavía tiene vigencia
+   * (fechaFin en el futuro), el nuevo período debe empezar cuando termina el
+   * actual — no el día del pago — para no quitarle los días ya pagados.
+   */
+  async obtenerUltimaFechaFin(contactId: string): Promise<Date | null> {
+    const url = `${this.baseUrl}/CSuscripcion`;
+
+    try {
+      const res = await axios.get(url, {
+        headers: { 'x-api-key': this.apiKey },
+        params: {
+          maxSize: 1,
+          orderBy: 'fechaFin',
+          order: 'desc',
+          'whereGroup[0][type]': 'equals',
+          'whereGroup[0][attribute]': 'contactId',
+          'whereGroup[0][value]': contactId,
+        },
+      });
+
+      const registro = res.data?.list?.[0];
+      if (!registro?.fechaFin) {
+        return null;
+      }
+
+      // fechaFin viene como 'YYYY-MM-DD'; se interpreta como fin del día en Bolivia
+      // para que una renovación pagada el mismo día del vencimiento aún encadene.
+      const fecha = new Date(`${registro.fechaFin}T23:59:59-04:00`);
+      this.logger.log(`Última fechaFin en CSuscripcion para contacto ${contactId}: ${registro.fechaFin}`);
+      return isNaN(fecha.getTime()) ? null : fecha;
+    } catch (error: any) {
+      this.logger.warn(
+        `No se pudo consultar la última fechaFin de CSuscripcion para contacto ${contactId}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Crea un registro de suscripción en la entidad CSuscripcion de EspoCRM,
    * vinculando el contacto con el plan comprado. Esta entidad es la que usa
    * el equipo de El Deber para administrar los planes y sus vencimientos
