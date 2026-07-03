@@ -31,9 +31,9 @@ export class ExpiracionService {
 
   // Corre dos veces al día (9:00 am y 9:00 pm hora Bolivia) para no dejar a
   // nadie con acceso de más muchas horas después de vencer.
-  // TEMPORAL para prueba en producción: 9:53 am hora Bolivia. Volver a
+  // TEMPORAL para prueba en producción: 10:05 am hora Bolivia. Volver a
   // '0 9,21 * * *' después de probar con la suscripción de Fernando.
-  @Cron('53 9 * * *', { timeZone: 'America/La_Paz' })
+  @Cron('5 10 * * *', { timeZone: 'America/La_Paz' })
   async desactivarSuscripcionesVencidas(): Promise<void> {
     this.logger.log('Iniciando revisión diaria de suscripciones vencidas...');
 
