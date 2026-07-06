@@ -4,7 +4,7 @@ import axios from 'axios';
 import { OpenaiService } from './openai.service';
 import { PaymentService } from './payment.service';
 import { WhatsappSenderService } from './whatsapp-sender.service';
-import { EspoContactService } from '../espocrm/espo-contact.service';
+import { EspoContactService, EspoContacto } from '../espocrm/espo-contact.service';
 import { SuscripcionesLogService } from '../suscripciones/suscripciones-log.service';
 import { MailService } from '../mail/mail.service';
 import { PlanesService } from '../planes/planes.service';
@@ -193,6 +193,13 @@ export class WhatsappService {
       cleanedReply = cleanedReply.replace(createRegex, '').trim();
     }
 
+    // Detectar si la respuesta contiene el RENEW_TRIGGER
+    const renewRegex = /\[RENEW_TRIGGER:(.*?)]/;
+    const renewMatch = cleanedReply.match(renewRegex);
+    if (renewMatch) {
+      cleanedReply = cleanedReply.replace(renewRegex, '').trim();
+    }
+
     // Detectar si la respuesta contiene el MENU_TRIGGER
     const menuRegex = /\[MENU_TRIGGER]/;
     const hasMenuTrigger = menuRegex.test(cleanedReply);
@@ -300,6 +307,70 @@ export class WhatsappService {
       this.crearCuentaIndependiente(waId, email, nombre).catch((err) => {
         this.logger.error(`[${waId}] Error creando cuenta independiente: ${err.message}`, err.stack);
       });
+    } else if (renewMatch) {
+      const emailIA = renewMatch[1];
+
+      const emailUsuario = this.openaiService.getLastKnownEmail(waId);
+      const email = emailUsuario ?? emailIA;
+      if (emailUsuario && emailUsuario !== emailIA) {
+        this.logger.warn(
+          `[${waId}] El correo del RENEW_TRIGGER ("${emailIA}") no coincide con el último correo escrito por el usuario ("${emailUsuario}"). Se usará el del usuario.`,
+        );
+      }
+
+      this.logger.log(`[${waId}] 🔄 Trigger de Renovación detectado. Email: ${email}`);
+
+      this.verificarCuentaParaRenovacion(waId, email).catch((err) => {
+        this.logger.error(`[${waId}] Error verificando cuenta para renovación: ${err.message}`, err.stack);
+      });
+    }
+  }
+
+  // ── Verificación real de cuenta para "Renovar mi plan" ──────────────────────
+
+  /**
+   * Consulta EspoCRM por el correo dado y le responde al usuario con el
+   * resultado REAL (si existe la cuenta, si está vigente o vencida), en vez
+   * de dejar que la IA improvise una respuesta genérica sin haber verificado
+   * nada.
+   */
+  private async verificarCuentaParaRenovacion(waId: string, email: string): Promise<void> {
+    let contacto: EspoContacto | null;
+    try {
+      contacto = await this.espoContactService.buscarContactoPorEmail(email);
+    } catch (err: any) {
+      this.logger.error(`[${waId}] Error consultando EspoCRM para renovación (${email}): ${err.message}`, err.stack);
+      await this.sendMessage(
+        waId,
+        'Tuvimos un problema técnico verificando tu cuenta. Por favor intenta de nuevo en unos minutos o escríbenos a nuestro asesor.',
+      );
+      return;
+    }
+
+    if (!contacto) {
+      await this.sendMessage(
+        waId,
+        `No encontramos ninguna cuenta registrada con el correo ${email}. Si quieres, puedo ayudarte a crear una cuenta nueva o a suscribirte a un plan. ¿Qué prefieres?`,
+      );
+      return;
+    }
+
+    const suscrito =
+      contacto.cSubscribed === true || contacto.cSubscribed === 1 || contacto.cSubscribed === '1';
+    const ultimaFechaFin = await this.espoContactService.obtenerUltimaFechaFin(contacto.id);
+    const vigente = suscrito && ultimaFechaFin !== null && ultimaFechaFin.getTime() > Date.now();
+
+    if (vigente && ultimaFechaFin) {
+      const fechaTexto = ultimaFechaFin.toLocaleDateString('es-BO', { timeZone: 'America/La_Paz' });
+      await this.sendMessage(
+        waId,
+        `¡Encontramos tu cuenta! Tu suscripción está vigente hasta el ${fechaTexto}. Si quieres renovar de todas formas (se sumará al periodo actual) o cambiar de plan, dime cuál te interesa.`,
+      );
+    } else {
+      await this.sendMessage(
+        waId,
+        'Encontramos tu cuenta, pero tu suscripción no está vigente actualmente. Dime qué plan te gustaría contratar para reactivarla.',
+      );
     }
   }
 
