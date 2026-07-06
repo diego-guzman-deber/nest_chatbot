@@ -1,22 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private resend: Resend;
+  private transporter: nodemailer.Transporter;
 
   constructor(private readonly config: ConfigService) {
-    const resendApiKey = this.config.get<string>('RESENED_API_KEY');
-    this.resend = new Resend(resendApiKey);
+    this.transporter = nodemailer.createTransport({
+      host: this.config.get<string>('AWS_SMTP_HOST') ?? 'email-smtp.us-east-1.amazonaws.com',
+      port: Number(this.config.get<string>('AWS_SMTP_PORT') ?? 587),
+      secure: false, // STARTTLS en el puerto 587
+      auth: {
+        user: this.config.get<string>('AWS_SMTP_USER'),
+        pass: this.config.get<string>('AWS_SMTP_PASSWORD'),
+      },
+    });
   }
 
   /**
    * Envía un correo con las credenciales de acceso al usuario.
    */
   async enviarCredenciales(email: string, contraseniaPlana: string, nombre: string): Promise<void> {
-    // Ahora que el dominio eldeber.bo está verificado, usamos el remitente correcto
+    // El dominio eldeber.bo está verificado en Amazon SES: cualquier dirección @eldeber.bo es válida como remitente.
     const from = this.config.get<string>('MAIL_FROM') ?? 'El Deber <no-reply@eldeber.bo>';
     const loginUrl = 'https://suscripciones.eldeber.com.bo/login';
 
@@ -28,7 +35,7 @@ export class MailService {
           <div style="padding: 20px;">
             <p>Hola <strong>${nombre}</strong>,</p>
             <p>Hemos verificado tu pago e iniciado el alta de tu suscripción. A continuación te proporcionamos tus credenciales de acceso al sistema Paywall de El Deber para que puedas acceder a la edición digital (ePaper) y contenido premium:</p>
-            
+
             <div style="background-color: #f9f9f9; border-left: 4px solid #fecb00; padding: 15px; margin: 20px 0; border-radius: 4px;">
               <p style="margin: 0 0 8px 0;"><strong>Usuario:</strong> ${email}</p>
               <p style="margin: 0;"><strong>Contraseña temporal:</strong> <span style="font-family: monospace; font-size: 16px; background: #eee; padding: 2px 6px; border-radius: 3px;">${contraseniaPlana}</span></p>
@@ -54,20 +61,15 @@ export class MailService {
 
     try {
       this.logger.log(`Enviando credenciales por correo a: ${email}`);
-      
-      const { data, error } = await this.resend.emails.send({
+
+      const info = await this.transporter.sendMail({
         from,
         to: email,
         subject: '🔑 Tus credenciales de acceso - El Deber',
         html,
       });
 
-      if (error) {
-        this.logger.error(`Error de Resend API al enviar correo a ${email}: ${error.message}`);
-        throw new Error(error.message);
-      }
-
-      this.logger.log(`📧 Correo enviado con éxito a: ${email}. ID: ${data?.id}`);
+      this.logger.log(`📧 Correo enviado con éxito a: ${email}. ID: ${info.messageId}`);
     } catch (error: any) {
       this.logger.error(`Error al enviar correo a ${email}: ${error.message}`, error.stack);
       throw error;
