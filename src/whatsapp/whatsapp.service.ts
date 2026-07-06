@@ -216,7 +216,18 @@ export class WhatsappService {
     // Si se detectó el trigger de pago, iniciar el proceso de cobro
     if (match) {
       const triggerData = match[1]; // plan|monto|nit|razonSocial|email
-      const [plan, , nit, razonSocial, email] = triggerData.split('|');
+      const [plan, , nit, razonSocial, emailIA] = triggerData.split('|');
+
+      // La IA a veces "alucina" y cambia algún carácter del correo al reescribirlo en
+      // el tag. Si detectamos un correo distinto en el último mensaje real del usuario,
+      // usamos ese en vez del que puso la IA para no crear/pagar una cuenta equivocada.
+      const emailUsuario = this.openaiService.getLastKnownEmail(waId);
+      const email = emailUsuario ?? emailIA;
+      if (emailUsuario && emailUsuario !== emailIA) {
+        this.logger.warn(
+          `[${waId}] El correo del PAYMENT_TRIGGER ("${emailIA}") no coincide con el último correo escrito por el usuario ("${emailUsuario}"). Se usará el del usuario.`,
+        );
+      }
 
       // Resolver el itemId, monto y frecuencia del plan contra el catálogo real
       // (MongoDB / plan de prueba). NUNCA se debe cobrar un monto que la IA haya
@@ -274,7 +285,15 @@ export class WhatsappService {
       });
     } else if (createMatch) {
       const triggerData = createMatch[1]; // email|nombre
-      const [email, nombre] = triggerData.split('|');
+      const [emailIA, nombre] = triggerData.split('|');
+
+      const emailUsuario = this.openaiService.getLastKnownEmail(waId);
+      const email = emailUsuario ?? emailIA;
+      if (emailUsuario && emailUsuario !== emailIA) {
+        this.logger.warn(
+          `[${waId}] El correo del CREATE_ACCOUNT_TRIGGER ("${emailIA}") no coincide con el último correo escrito por el usuario ("${emailUsuario}"). Se usará el del usuario.`,
+        );
+      }
 
       this.logger.log(`[${waId}] 👤 Trigger de Crear Cuenta detectado. Email: ${email}, Nombre: ${nombre}`);
 

@@ -19,7 +19,7 @@ NUNCA muestres el catálogo de planes en este primer saludo. Espera a que el usu
 Cuando el usuario presione o escriba una de estas opciones, debes responder del siguiente modo:
 1. **Ver planes**: Muestra el catálogo de planes disponibles (usando el catálogo detallado abajo) de forma organizada, atractiva y visualmente clara, usando emojis.
 2. **Ya soy cliente**: Indícale amablemente que para gestionar su cuenta o ver su suscripción puede acceder directamente a la plataforma en https://epaper.eldeber.com.bo/
-3. **Renovar mi plan**: Solicítale al usuario su correo electrónico para que se pueda verificar su cuenta en el sistema para la renovación. Una vez que te brinde el correo, agradécele e indícales que el equipo verificará si existe su cuenta.
+3. **Renovar mi plan**: Solicítale al usuario su correo electrónico para que se pueda verificar su cuenta en el sistema para la renovación. Una vez que te brinde el correo, agradécele e indícale que el equipo verificará si existe su cuenta. NO reescribas ni repitas el correo en tu respuesta (basta con agradecer, sin citarlo de nuevo).
 4. **Preguntas frecuentes**: Preséntale una lista corta de 3 o 4 preguntas frecuentes y sus respuestas de manera concisa (por ejemplo, métodos de pago con QR, acceso multidispositivo o el boletín diario).
 5. **Hablar con asesor**: Indícale de manera muy atenta que puede comunicarse directamente con nuestro asesor **Carlos Hurtado** al número de WhatsApp **+591 77305605** (o mediante el enlace https://wa.me/59177305605).
 
@@ -28,6 +28,7 @@ Cuando el usuario presione o escriba una de estas opciones, debes responder del 
 - Si el usuario pregunta algo completamente ajeno a suscripciones (política, programación, chistes, etc.), redirige amablemente:
   "Solo puedo ayudarte con los planes de suscripción de El Deber. ¿Te cuento sobre alguno?"
 - **PROHIBIDO EL EMOJI 😊:** Está ESTRICTAMENTE PROHIBIDO usar el emoji 😊. NO lo utilices bajo ninguna circunstancia, ya que resulta repetitivo. Si deseas sonar amable, utiliza palabras cálidas o esporádicamente otros emojis (como 👋, 📰, o 🚀), pero NUNCA uses la carita sonriente 😊.
+- **DATOS DEL USUARIO (correo, NIT, Razón Social, nombre): NUNCA los reescribas de memoria.** Si necesitas citarlos en tu respuesta o en un tag, cópialos letra por letra exactamente como el usuario los escribió en su último mensaje. Si no es indispensable repetirlos, no los repitas.
 
 ## 🌟 BENEFICIOS INCLUIDOS
 - **BOLETÍN DIARIO DIGITAL:** Cualquier plan incluye el envío diario del boletín de noticias al correo del usuario sin costo adicional.
@@ -64,6 +65,12 @@ export class OpenaiService implements OnModuleInit {
 
   // Mapa en memoria: wa_id -> último response.id de OpenAI
   private readonly responseIdMap = new Map<string, string>();
+
+  // Mapa en memoria: wa_id -> último correo electrónico que el usuario escribió tal cual
+  // (para poder validar/corregir el correo que la IA repite en su texto o en los tags,
+  // ya que un modelo puede "alucinar" y cambiar algún carácter al reescribirlo).
+  private readonly lastEmailMap = new Map<string, string>();
+  private static readonly EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
   // Lock simple por usuario para evitar duplicados de webhook
   private readonly activeLocks = new Set<string>();
@@ -109,6 +116,13 @@ export class OpenaiService implements OnModuleInit {
     }
     this.activeLocks.add(waId);
 
+    // Guardar el correo tal cual lo escribió el usuario en este turno (si lo hay),
+    // para poder corregir después cualquier alucinación de la IA al repetirlo.
+    const emailMatch = messageBody.match(OpenaiService.EMAIL_REGEX);
+    if (emailMatch) {
+      this.lastEmailMap.set(waId, emailMatch[0]);
+    }
+
     try {
       const model = this.config.get<string>('OPENAI_MODEL') ?? 'gpt-4o-mini';
       const client = this.getClient();
@@ -123,6 +137,7 @@ export class OpenaiService implements OnModuleInit {
           previous_response_id: prevResponseId,
           instructions: this.systemPrompt,
           input: messageBody,
+          temperature: 0,
         } as any);
       } else {
         this.logger.log(`[${waId}] Nueva conversación para ${name}.`);
@@ -130,6 +145,7 @@ export class OpenaiService implements OnModuleInit {
           model,
           instructions: this.systemPrompt,
           input: messageBody,
+          temperature: 0,
         } as any);
       }
 
@@ -157,5 +173,13 @@ export class OpenaiService implements OnModuleInit {
     } finally {
       this.activeLocks.delete(waId);
     }
+  }
+
+  /**
+   * Devuelve el último correo que el usuario escribió tal cual (detectado por regex),
+   * para validar/corregir el que la IA pueda repetir mal en el texto o en un trigger.
+   */
+  getLastKnownEmail(waId: string): string | undefined {
+    return this.lastEmailMap.get(waId);
   }
 }
