@@ -24,7 +24,7 @@ export class MailService {
    */
   async enviarCredenciales(email: string, contraseniaPlana: string, nombre: string): Promise<void> {
     // El dominio eldeber.bo está verificado en Amazon SES: cualquier dirección @eldeber.bo es válida como remitente.
-    const from = this.config.get<string>('MAIL_FROM') ?? 'El Deber <no-reply@eldeber.bo>';
+    const from = this.config.get<string>('MAIL_FROM') ?? 'El Deber <edi@eldeber.bo>';
     const loginUrl = 'https://suscripciones.eldeber.com.bo/login';
 
     const html = `
