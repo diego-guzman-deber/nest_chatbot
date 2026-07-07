@@ -30,7 +30,8 @@ export class RecordatoriosService {
 
   // TEMPORAL para prueba en producción: 12:50 hora Bolivia. Volver a
   // CronExpression.EVERY_DAY_AT_9AM ('0 9 * * *') después de probar.
-  @Cron('50 12 * * *', { timeZone: 'America/La_Paz' })
+  // PAUSADO: @Cron deshabilitado a propósito, no ejecutar hasta que se reactive.
+  // @Cron('50 12 * * *', { timeZone: 'America/La_Paz' })
   async enviarRecordatoriosDeVencimiento(): Promise<void> {
     this.logger.log('Iniciando revisión diaria de suscripciones próximas a vencer...');
 
