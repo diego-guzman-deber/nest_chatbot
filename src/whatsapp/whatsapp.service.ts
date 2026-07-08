@@ -631,11 +631,29 @@ export class WhatsappService {
           // el plan de prueba 'ChatbotSus'; esas compras se registran como
           // EPAPER MENSUAL (epaper01) dejando constancia del plan real en la descripción.
           const esPrueba = datosPlan.itemId === 'ChatbotSus';
+
+          // Forzamos el valor exacto que espera el enum de EspoCRM para los
+          // planes "Solo Newsletter" (misma lógica de seguridad que el plan de
+          // prueba): nunca se confía en un itemId libre, solo en uno de estos
+          // tres valores literales, para que jamás termine cayendo en epaper.
+          const NEWSLETTER_ITEM_IDS: Record<string, string> = {
+            NL01: 'NL01',
+            NL03: 'NL03',
+            NL12: 'NL12',
+          };
+          const esNewsletter = datosPlan.itemId in NEWSLETTER_ITEM_IDS;
+
+          const paqueteNewsletterForzado = esPrueba
+            ? 'epaper01'
+            : esNewsletter
+              ? NEWSLETTER_ITEM_IDS[datosPlan.itemId]
+              : datosPlan.itemId;
+
           await this.espoContactService.crearSuscripcion({
             contactId:   contactIdReal,
             razonSocial: datosPlan.razonSocial,
             nit:         datosPlan.nit,
-            paquete:     esPrueba ? 'epaper01' : datosPlan.itemId,
+            paquete:     paqueteNewsletterForzado,
             monto:       datosPlan.monto,
             fechaInicio: inicioVigencia,
             fechaFin:    finVigencia,
