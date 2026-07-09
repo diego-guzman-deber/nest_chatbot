@@ -35,6 +35,10 @@ lerna-debug.log*
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# Certificados y credenciales bancarias (BCP)
+/certs
+*.pem
+
 # dotenv environment variable files
 .env
 .env.development.local
