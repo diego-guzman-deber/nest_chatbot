@@ -65,14 +65,14 @@ export class PaymentService {
 
   /**
    * Obtiene la imagen del QR de suscripciones de El Deber como Buffer binario.
-   * Parámetros basados en el proyecto paywall:
-   *   sistema=suscripcion, tipo={itemId}, descripcion={razonSocial}|{nit}
+   * Usa qrcode-vigencia.php (endpoint nuevo en apipos, no modifica qrcode.php
+   * que usan otras apps) para poder fijar la vigencia real del QR en minutos
+   * en vez de la vigencia de ~1 día que qrcode.php hardcodea.
    *
-   * NOTA: se intentó llamar directo al BCP (bypassando este endpoint) para
-   * controlar la expiración real del QR, pero apis.bcp.com.bo solo es
-   * alcanzable desde la red/IP de apipos.eldeber.com.bo (en Dokploy da
-   * "getaddrinfo EAI_AGAIN apis.bcp.com.bo"). Revertido hasta resolver el
-   * whitelisting de red con el BCP o con infraestructura de El Deber.
+   * NOTA: antes se intentó llamar directo al BCP (bypassando apipos), pero
+   * apis.bcp.com.bo solo es alcanzable desde la red/IP de apipos.eldeber.com.bo
+   * (en Dokploy daba "getaddrinfo EAI_AGAIN apis.bcp.com.bo"). Por eso se optó
+   * por este endpoint intermedio en vez de llamar al BCP directamente.
    */
   async obtenerQrBuffer(
     amount: number,
@@ -81,23 +81,25 @@ export class PaymentService {
     nit: string,
     itemId: string,
   ): Promise<Buffer> {
-    const baseUrl = this.config.getOrThrow<string>('QR_API_URL');
+    const baseUrl = this.config.getOrThrow<string>('QR_VIGENCIA_API_URL');
     const sistema = this.config.getOrThrow<string>('QR_SISTEMA');
+    const expirationMinutes = this.config.get<string>('QR_EXPIRATION_MINUTES') ?? '30';
 
     const descripcion = `${razonSocial}|${nit}`;
 
     this.logger.log(
-      `Solicitando QR: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}`,
+      `Solicitando QR: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}, expirationMinutes=${expirationMinutes}`,
     );
 
     try {
       const response = await axios.get(baseUrl, {
         params: {
-          amount:      amount,
-          orderid:     orderId,
-          sistema:     sistema,
-          tipo:        itemId,
-          descripcion: descripcion,
+          amount:             amount,
+          orderid:            orderId,
+          sistema:            sistema,
+          tipo:               itemId,
+          descripcion:        descripcion,
+          expirationMinutes:  expirationMinutes,
         },
         responseType: 'arraybuffer',
       });
