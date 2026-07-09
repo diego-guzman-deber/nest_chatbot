@@ -67,6 +67,11 @@ export class PaymentService {
    * Obtiene la imagen del QR de suscripciones de El Deber como Buffer binario.
    * Parámetros basados en el proyecto paywall:
    *   sistema=suscripcion, tipo={itemId}, descripcion={razonSocial}|{nit}
+   *
+   * expiration: vigencia del QR en el formato que espera el BCP, "D/HH:MM"
+   * (días/horas:minutos). Se fija en "0/00:15" (15 minutos) para que coincida
+   * con la ventana de monitoreo del chatbot; antes no se enviaba este parámetro
+   * y el QR quedaba con la vigencia por defecto del BCP (hasta el día siguiente).
    */
   async obtenerQrBuffer(
     amount: number,
@@ -79,9 +84,10 @@ export class PaymentService {
     const sistema = this.config.getOrThrow<string>('QR_SISTEMA');
 
     const descripcion = `${razonSocial}|${nit}`;
+    const expiration = '0/00:15';
 
     this.logger.log(
-      `Solicitando QR: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}`,
+      `Solicitando QR: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}, expiration=${expiration}`,
     );
 
     try {
@@ -92,6 +98,7 @@ export class PaymentService {
           sistema:     sistema,
           tipo:        itemId,
           descripcion: descripcion,
+          expiration:  expiration,
         },
         responseType: 'arraybuffer',
       });
