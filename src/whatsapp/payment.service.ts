@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import * as https from 'https';
-import * as fs from 'fs';
-import * as path from 'path';
 import { PlanesService } from '../planes/planes.service';
 
 // Plan de prueba de 1 Bs: vive solo aquí y en el prompt, no en MongoDB
@@ -67,11 +64,15 @@ export class PaymentService {
   }
 
   /**
-   * Obtiene la imagen del QR de suscripciones como Buffer binario, llamando
-   * DIRECTO a la API del BCP (mismo endpoint, certificado mTLS y credenciales
-   * que usa el proyecto apipos en qrcode.php). Se bypassa apipos.eldeber.com.bo
-   * porque ese endpoint hardcodea expiration="1/02:15" (~1 día) sin importar
-   * lo que se le mande — acá sí controlamos la vigencia real del QR (15 min).
+   * Obtiene la imagen del QR de suscripciones de El Deber como Buffer binario.
+   * Parámetros basados en el proyecto paywall:
+   *   sistema=suscripcion, tipo={itemId}, descripcion={razonSocial}|{nit}
+   *
+   * NOTA: se intentó llamar directo al BCP (bypassando este endpoint) para
+   * controlar la expiración real del QR, pero apis.bcp.com.bo solo es
+   * alcanzable desde la red/IP de apipos.eldeber.com.bo (en Dokploy da
+   * "getaddrinfo EAI_AGAIN apis.bcp.com.bo"). Revertido hasta resolver el
+   * whitelisting de red con el BCP o con infraestructura de El Deber.
    */
   async obtenerQrBuffer(
     amount: number,
@@ -80,82 +81,31 @@ export class PaymentService {
     nit: string,
     itemId: string,
   ): Promise<Buffer> {
+    const baseUrl = this.config.getOrThrow<string>('QR_API_URL');
     const sistema = this.config.getOrThrow<string>('QR_SISTEMA');
+
     const descripcion = `${razonSocial}|${nit}`;
-    const expiration = this.config.get<string>('BCP_EXPIRATION') ?? '0/00:15';
-
-    const bcpUrl = this.config.getOrThrow<string>('BCP_QR_API_URL');
-    const authUser = this.config.getOrThrow<string>('BCP_AUTH_USER');
-    const authPassword = this.config.getOrThrow<string>('BCP_AUTH_PASSWORD');
-    const correlationId = `QR-${orderId}`;
-
-    const params = {
-      orderid:      orderId,
-      sistema:      sistema,
-      tipo:         itemId,
-      descripcion:  descripcion,
-      currency:     'BOB',
-      amount:       String(amount),
-      appUserId:    this.config.getOrThrow<string>('BCP_APP_USER_ID'),
-      serviceCode:  this.config.getOrThrow<string>('BCP_SERVICE_CODE'),
-      Gloss:        `QR-${orderId} ${amount} ${sistema}`,
-      expiration:   expiration,
-      businessCode: this.config.getOrThrow<string>('BCP_BUSINESS_CODE'),
-      publicToken:  this.config.getOrThrow<string>('BCP_PUBLIC_TOKEN'),
-      City:         this.config.getOrThrow<string>('BCP_CITY'),
-      Teller:       this.config.getOrThrow<string>('BCP_TELLER'),
-      singleUse:    'true',
-      enableBank:   'ALL',
-      PhoneNumber:  this.config.getOrThrow<string>('BCP_PHONE_NUMBER'),
-      BranchOffice: this.config.getOrThrow<string>('BCP_BRANCH_OFFICE'),
-    };
 
     this.logger.log(
-      `Solicitando QR directo al BCP: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}, expiration=${expiration}`,
+      `Solicitando QR: orden=${orderId}, monto=${amount} Bs, sistema=${sistema}, tipo=${itemId}`,
     );
 
     try {
-      const pem = this.obtenerCertificadoBcp();
-      const httpsAgent = new https.Agent({ cert: pem, key: pem });
-      const authHeader = 'Basic ' + Buffer.from(`${authUser}:${authPassword}`).toString('base64');
-
-      const response = await axios.post(bcpUrl, params, {
-        httpsAgent,
-        headers: {
-          'Correlation-Id': correlationId,
-          Authorization: authHeader,
-          'Content-Type': 'application/json',
+      const response = await axios.get(baseUrl, {
+        params: {
+          amount:      amount,
+          orderid:     orderId,
+          sistema:     sistema,
+          tipo:        itemId,
+          descripcion: descripcion,
         },
+        responseType: 'arraybuffer',
       });
 
-      const data = response.data?.data;
-      if (!data?.qrImage) {
-        this.logger.error(`Respuesta del BCP sin qrImage para la orden ${orderId}: ${JSON.stringify(response.data)}`);
-        throw new Error('La respuesta del BCP no incluyó la imagen del QR.');
-      }
-
-      this.logger.log(`QR del BCP generado para la orden ${orderId}, expirationDate=${data.expirationDate}`);
-      return Buffer.from(data.qrImage, 'base64');
+      return Buffer.from(response.data, 'binary');
     } catch (error: any) {
-      this.logger.error(`Error al obtener QR directo del BCP: ${error.message}`, error.stack);
+      this.logger.error(`Error al obtener QR de El Deber: ${error.message}`, error.stack);
       throw error;
     }
-  }
-
-  /**
-   * Obtiene el certificado mTLS del BCP (cert + key combinados en un solo PEM).
-   * En producción (Dokploy) NO existe el archivo /certs en el contenedor —solo
-   * se inyectan variables de entorno—, así que ahí se usa BCP_CERT_BASE64 (el
-   * PEM codificado en base64). En local se usa BCP_CERT_PATH apuntando al
-   * archivo en certs/.
-   */
-  private obtenerCertificadoBcp(): Buffer {
-    const certBase64 = this.config.get<string>('BCP_CERT_BASE64');
-    if (certBase64) {
-      return Buffer.from(certBase64, 'base64');
-    }
-
-    const certPath = path.resolve(this.config.getOrThrow<string>('BCP_CERT_PATH'));
-    return fs.readFileSync(certPath);
   }
 }
