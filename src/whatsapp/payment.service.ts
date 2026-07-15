@@ -29,7 +29,7 @@ export class PaymentService {
    * Obtiene el itemId, monto y frecuencia para un plan dado.
    * Consulta MongoDB primero; si no encuentra el plan, verifica si es el plan de prueba.
    */
-  async resolverPlan(planNombre: string): Promise<{ itemId: string; monto: number; frecuencia?: string } | null> {
+  async resolverPlan(planNombre: string): Promise<{ itemId: string; monto: number; frecuencia?: string; categoria?: string } | null> {
     const normalized = planNombre.toLowerCase().trim();
 
     // Verificar si es el plan de prueba (no está en MongoDB)

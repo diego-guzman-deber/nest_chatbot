@@ -249,6 +249,19 @@ export class WhatsappService {
         );
         return;
       }
+      // Los planes con periódico impreso requieren validar si la dirección del
+      // usuario está dentro de la zona de reparto antes de cobrar; eso no se
+      // puede automatizar, así que en vez de generar el QR se deriva a Carlos
+      // Hurtado para que haga la validación humana y cierre la suscripción.
+      if (planResuelto.categoria === 'impreso') {
+        this.logger.log(`[${waId}] Plan "${plan}" es de categoría impreso: se deriva a asesor en vez de generar QR.`);
+        await this.sendMessage(
+          waId,
+          'Este plan incluye periódico físico en tu domicilio, así que antes de generar el cobro necesitamos validar si tu dirección está dentro de nuestra zona de reparto. Por favor escríbele directamente a nuestro asesor *Carlos Hurtado* al WhatsApp *+591 77305605* (https://wa.me/59177305605) para confirmar la cobertura y completar tu suscripción.',
+        );
+        return;
+      }
+
       const monto = planResuelto.monto;
       const itemId = planResuelto.itemId;
       const frecuencia = planResuelto.frecuencia ?? 'mensual';
