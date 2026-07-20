@@ -46,41 +46,12 @@ const PLANES_INICIALES: Omit<Plan, never>[] = [
     activo: true,
   },
   {
-    nombre: 'ePaper + Newsletter Trimestral',
-    itemId: 'EP03',
-    monto: 200,
-    frecuencia: 'trimestral',
-    categoria: 'epaper',
-    descripcion: 'ePaper + newsletter por 3 meses. Ideal para lectores frecuentes.',
-    activo: true,
-  },
-  {
     nombre: 'ePaper + Newsletter Anual',
     itemId: 'epaper12',
     monto: 700,
     frecuencia: 'anual',
     categoria: 'epaper',
     descripcion: 'ePaper + newsletter por un año completo. El plan digital más popular.',
-    activo: true,
-  },
-
-  // ── Combos digitales ─────────────────────────────────────────────────────
-  {
-    nombre: 'Combo ePaper 3 Cuentas Anual',
-    itemId: 'EP3C12',
-    monto: 1100,
-    frecuencia: 'anual',
-    categoria: 'combo',
-    descripcion: 'ePaper + newsletter anual para 3 cuentas. Perfecto para familia o pequeño equipo.',
-    activo: true,
-  },
-  {
-    nombre: 'Plan Corporativo 10 Cuentas Anual',
-    itemId: 'EPCORP12',
-    monto: 2000,
-    frecuencia: 'anual',
-    categoria: 'combo',
-    descripcion: 'ePaper + newsletter anual para hasta 10 cuentas. Ideal para empresas.',
     activo: true,
   },
 
@@ -121,35 +92,6 @@ const PLANES_INICIALES: Omit<Plan, never>[] = [
     descripcion: 'Periódico físico de domingo a viernes + ePaper + newsletter durante todo un año.',
     activo: true,
   },
-  {
-    nombre: 'Impreso Lunes-Viernes + ePaper Anual',
-    itemId: 'ImpLV12',
-    monto: 2300,
-    frecuencia: 'anual',
-    categoria: 'impreso',
-    descripcion: 'Periódico físico de lunes a viernes + ePaper + newsletter durante todo un año.',
-    activo: true,
-  },
-
-  // ── Solo Domingo ─────────────────────────────────────────────────────────
-  {
-    nombre: 'Impreso Solo Domingo Semestral',
-    itemId: 'ImpDom06',
-    monto: 230,
-    frecuencia: 'semestral',
-    categoria: 'impreso',
-    descripcion: 'Periódico físico solo los domingos en tu domicilio durante 6 meses.',
-    activo: true,
-  },
-  {
-    nombre: 'Impreso Solo Domingo Anual',
-    itemId: 'ImpDom12',
-    monto: 440,
-    frecuencia: 'anual',
-    categoria: 'impreso',
-    descripcion: 'Periódico físico solo los domingos en tu domicilio durante todo un año.',
-    activo: true,
-  },
 ];
 
 @Injectable()
@@ -160,16 +102,27 @@ export class PlanesService implements OnModuleInit {
     @InjectModel(Plan.name) private readonly planModel: Model<PlanDocument>,
   ) {}
 
-  // ── Seed automático al arrancar ──────────────────────────────────────────
+  // ── Sincronización automática al arrancar ────────────────────────────────
+  // Inserta/actualiza los planes vigentes y desactiva cualquier plan que ya no
+  // esté en PLANES_INICIALES, para que el bot solo ofrezca el catálogo actual.
   async onModuleInit(): Promise<void> {
-    const count = await this.planModel.countDocuments();
-    if (count === 0) {
-      this.logger.log('Colección "planes" vacía. Insertando planes iniciales...');
-      await this.planModel.insertMany(PLANES_INICIALES);
-      this.logger.log(`✅ ${PLANES_INICIALES.length} planes insertados en MongoDB.`);
-    } else {
-      this.logger.log(`ℹ️  Colección "planes" ya tiene ${count} planes. No se requiere seed.`);
+    for (const plan of PLANES_INICIALES) {
+      await this.planModel.updateOne(
+        { itemId: plan.itemId },
+        { $set: plan },
+        { upsert: true },
+      );
     }
+
+    const itemIdsVigentes = PLANES_INICIALES.map((p) => p.itemId);
+    const { modifiedCount } = await this.planModel.updateMany(
+      { itemId: { $nin: itemIdsVigentes }, activo: true },
+      { $set: { activo: false } },
+    );
+
+    this.logger.log(
+      `✅ Planes sincronizados: ${PLANES_INICIALES.length} activos, ${modifiedCount} desactivados.`,
+    );
   }
 
   // ── Obtener todos los planes activos ────────────────────────────────────
