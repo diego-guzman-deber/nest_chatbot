@@ -8,6 +8,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { PlanesModule } from './planes/planes.module';
 import { RecordatoriosModule } from './recordatorios/recordatorios.module';
 import { LegacyVencidosModule } from './legacy-vencidos/legacy-vencidos.module';
+import { MensajesModule } from './mensajes/mensajes.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { LegacyVencidosModule } from './legacy-vencidos/legacy-vencidos.module';
     WhatsappModule,
     RecordatoriosModule,
     LegacyVencidosModule,
+    MensajesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

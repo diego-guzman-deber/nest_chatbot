@@ -19,8 +19,12 @@ export class WhatsappSenderService {
   /**
    * Envía un mensaje de texto a un número de WhatsApp.
    * Retorna true si el envío tuvo éxito, false si falló (ya loggeado).
+   *
+   * @param previewUrl Si es true, WhatsApp genera la tarjeta de vista previa
+   *   del primer enlace que aparezca en el texto (útil, p. ej., para compartir
+   *   un enlace de Facebook con miniatura).
    */
-  async enviarMensaje(waId: string, text: string): Promise<boolean> {
+  async enviarMensaje(waId: string, text: string, previewUrl = false): Promise<boolean> {
     const version = this.config.get<string>('VERSION') ?? 'v25.0';
     const phoneNumberId = this.config.get<string>('PHONE_NUMBER_ID');
     const accessToken = this.config.get<string>('ACCESS_TOKEN');
@@ -33,7 +37,7 @@ export class WhatsappSenderService {
       to: waId,
       type: 'text',
       text: {
-        preview_url: false,
+        preview_url: previewUrl,
         body: text,
       },
     };
