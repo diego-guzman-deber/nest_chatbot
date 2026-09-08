@@ -152,7 +152,9 @@ export class WhatsappSenderService {
           'Content-Type': 'application/json',
         },
       });
-      this.logger.log(`[${waId}] ✅ Plantilla "${templateName}" enviada. Status: ${res.status}`);
+      this.logger.log(
+        `[${waId}] ✅ Plantilla "${templateName}" aceptada por Meta. Status: ${res.status}. Respuesta: ${JSON.stringify(res.data)}`,
+      );
       return true;
     } catch (error: any) {
       const detail = error?.response?.data ?? error?.message;
