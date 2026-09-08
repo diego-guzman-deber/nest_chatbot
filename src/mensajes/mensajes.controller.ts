@@ -24,10 +24,22 @@ interface EnviarMensajeBody {
   telefono?: string;
   /** Alias de `telefono`. */
   to?: string;
-  /** Texto del mensaje. Si se omite, usa MENSAJE_STAND_TEXTO o el valor por defecto. */
+  /** Texto del mensaje (solo modo texto libre / dentro de la ventana de 24h). */
   mensaje?: string;
-  /** Enlace (p. ej. de Facebook) que se agrega al final del mensaje. */
+  /** Enlace (p. ej. de Facebook). En texto libre se agrega al final; en plantilla se usa como parámetro {{1}} si no se pasan `parametros`. */
   enlace?: string;
+
+  /**
+   * Nombre de una plantilla APROBADA en Meta. Si se envía, se usa modo
+   * plantilla (única forma de escribirle a un número que NO te escribió en las
+   * últimas 24h). Si se omite, se usa MENSAJE_STAND_PLANTILLA del .env; y si
+   * tampoco existe, se manda texto libre.
+   */
+  plantilla?: string;
+  /** Código de idioma de la plantilla (ej. "es"). Default: MENSAJE_STAND_PLANTILLA_LANG o "es". */
+  idioma?: string;
+  /** Valores para las variables {{1}}, {{2}}, ... del body de la plantilla, en orden. */
+  parametros?: string[];
 }
 
 /**
@@ -38,9 +50,13 @@ interface EnviarMensajeBody {
  * Requiere el query `token` igual a ADMIN_SEED_TOKEN (.env del servidor). Sin
  * esa variable configurada, el endpoint rechaza todo.
  *
- * OJO: usa un mensaje de texto libre, que Meta solo permite dentro de la
- * ventana de 24h desde el último mensaje del usuario. Fuera de esa ventana el
- * envío falla (error 131047) y hace falta una plantilla aprobada.
+ * Dos modos:
+ *  - TEXTO LIBRE (sin `plantilla`): Meta solo lo permite dentro de la ventana
+ *    de 24h desde el último mensaje del usuario. Fuera de esa ventana falla
+ *    (error 131047).
+ *  - PLANTILLA (`plantilla` o MENSAJE_STAND_PLANTILLA en .env): funciona
+ *    siempre, incluso si el número nunca escribió al bot. La plantilla debe
+ *    estar creada y APROBADA en WhatsApp Manager.
  */
 @Controller('mensajes')
 export class MensajesController {
@@ -53,6 +69,7 @@ export class MensajesController {
 
   // GET para poder dispararlo desde el navegador pegando el link.
   // Ej: /mensajes/enviar?token=XXX&telefono=71234567&enlace=https://facebook.com/...
+  //     /mensajes/enviar?token=XXX&telefono=63525425&plantilla=video_stand&parametros=https://facebook.com/...
   @Get('enviar')
   async enviarPorNavegador(
     @Query('token') token: string,
@@ -63,6 +80,16 @@ export class MensajesController {
       to: query.to,
       mensaje: query.mensaje,
       enlace: query.enlace,
+      plantilla: query.plantilla,
+      idioma: query.idioma,
+      // En GET, `parametros` puede venir repetido (?parametros=a&parametros=b)
+      // o como uno solo. Normalizamos a array.
+      parametros:
+        query.parametros === undefined
+          ? undefined
+          : Array.isArray(query.parametros)
+            ? query.parametros
+            : [query.parametros],
     });
   }
 
@@ -83,27 +110,61 @@ export class MensajesController {
       );
     }
 
+    const enlace =
+      body?.enlace?.trim() || this.config.get<string>('MENSAJE_STAND_ENLACE') || '';
+
+    const plantilla =
+      body?.plantilla?.trim() || this.config.get<string>('MENSAJE_STAND_PLANTILLA') || '';
+
+    // ── Modo PLANTILLA ────────────────────────────────────────────────────────
+    // Único modo que funciona para números que NO le escribieron al bot.
+    if (plantilla) {
+      const idioma =
+        body?.idioma?.trim() ||
+        this.config.get<string>('MENSAJE_STAND_PLANTILLA_LANG') ||
+        'es';
+
+      // Si no mandan `parametros` explícitos, usamos el enlace como {{1}}.
+      const parametros =
+        body?.parametros && body.parametros.length > 0
+          ? body.parametros
+          : enlace
+            ? [enlace]
+            : [];
+
+      this.logger.log(
+        `Enviando plantilla "${plantilla}" (${idioma}) a ${waId}. Params: ${JSON.stringify(parametros)}`,
+      );
+
+      const enviado = await this.sender.enviarPlantilla(waId, plantilla, idioma, parametros);
+      if (!enviado) {
+        throw new BadRequestException(
+          `No se pudo enviar la plantilla "${plantilla}". Revisá los logs: verificá que exista y esté APROBADA en WhatsApp Manager, con el idioma "${idioma}" y la cantidad de variables correcta.`,
+        );
+      }
+
+      return { status: 'ok', modo: 'plantilla', to: waId, plantilla, idioma, parametros };
+    }
+
+    // ── Modo TEXTO LIBRE (solo dentro de la ventana de 24h) ────────────────────
     const texto =
       body?.mensaje?.trim() ||
       this.config.get<string>('MENSAJE_STAND_TEXTO') ||
       MENSAJE_STAND_TEXTO_DEFECTO;
 
-    const enlace =
-      body?.enlace?.trim() || this.config.get<string>('MENSAJE_STAND_ENLACE') || '';
-
     const cuerpo = enlace ? `${texto}\n\n${enlace}` : texto;
 
-    this.logger.log(`Enviando mensaje de stand a ${waId} (enlace: ${enlace || 'ninguno'})`);
+    this.logger.log(`Enviando mensaje de texto libre a ${waId} (enlace: ${enlace || 'ninguno'})`);
 
     // preview_url = true para que el enlace de Facebook muestre miniatura.
     const enviado = await this.sender.enviarMensaje(waId, cuerpo, Boolean(enlace));
     if (!enviado) {
       throw new BadRequestException(
-        'No se pudo enviar el mensaje. Revisá los logs del servidor (posible ventana de 24h vencida o número no válido en WhatsApp).',
+        'No se pudo enviar el mensaje de texto libre. Probablemente el número no le escribió al bot en las últimas 24h: usá el modo plantilla (campo "plantilla").',
       );
     }
 
-    return { status: 'ok', to: waId, mensaje: cuerpo };
+    return { status: 'ok', modo: 'texto', to: waId, mensaje: cuerpo };
   }
 
   /**
