@@ -33,7 +33,7 @@ export class SuscripcionLog {
   @Prop({ required: true })
   monto: number;
 
-  /** orderId de la transacción QR: wa-{contactId}-{YYYYMM} */
+  /** orderId de la transacción QR: wa-{contactId}-{YYYYMM}-{timestamp} */
   @Prop({ required: true, index: true })
   orderId: string;
 

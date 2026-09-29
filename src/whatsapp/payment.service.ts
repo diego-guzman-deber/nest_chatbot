@@ -11,7 +11,7 @@ const PLAN_PRUEBA = { itemId: 'ChatbotSus', monto: 1 };
  *
  * Responsabilidad única: flujo de pagos QR de suscripciones.
  *   - Resolver el plan (itemId, monto, frecuencia) desde MongoDB o como plan de prueba.
- *   - Generar el orderId con formato wa-{contactId}-{YYYYMM}.
+ *   - Generar el orderId con formato wa-{contactId}-{YYYYMM}-{timestamp}.
  *   - Obtener el buffer del QR de pago desde la API de El Deber.
  *
  * La gestión de contactos en EspoCRM fue extraída a EspoContactService.
@@ -51,16 +51,23 @@ export class PaymentService {
 
   /**
    * Genera el orderId para suscripciones originadas desde el chatbot de WhatsApp.
-   * Formato: wa-{contactId}-{YYYYMM}
+   * Formato: wa-{contactId}-{YYYYMM}-{timestamp}
    *   - Prefijo "wa-" identifica en la DB de El Deber que el pago vino del chatbot.
-   *   - {contactId} = ID del contacto en EspoCRM.
+   *   - {contactId} = ID del contacto en EspoCRM (apipos/ipn.php lo lee de la
+   *     posición [1] al separar por "-", por eso el sufijo va siempre al final).
    *   - {YYYYMM} = año y mes de la suscripción (ej: 202406).
-   * Ejemplo resultado: wa-59164442738-202406
+   *   - {timestamp} = ms desde epoch; hace única cada orden/QR.
+   * Ejemplo resultado: wa-59164442738-202406-1718131200000
    */
   generarOrderId(contactId: string): string {
     const now = new Date();
     const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return `wa-${contactId}-${yyyymm}`;
+    return `wa-${contactId}-${yyyymm}-${now.getTime()}`;
+  }
+
+  /** Prefijo común de todas las órdenes de un contacto: "wa-{contactId}-". */
+  prefijoOrdenContacto(orderId: string): string {
+    return orderId.slice(0, orderId.indexOf('-', 3) + 1);
   }
 
   /**

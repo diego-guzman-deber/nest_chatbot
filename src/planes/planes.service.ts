@@ -5,36 +5,10 @@ import { Plan, PlanDocument } from './schemas/plan.schema';
 
 // ── Datos iniciales (seed) ──────────────────────────────────────────────────
 // El plan de PRUEBA de 1 Bs NO está aquí; vive solo en el SYSTEM_PROMPT.
+// Solo se ofrecen los itemId que apipos/ipn.php reconoce al activar el pago
+// (SD01, epaper01, Impreso1DV, PP1A, epaper12, Impreso1ADV) o que no pasan por
+// QR (IMP03 se deriva a un asesor). Newsletter e IMP06 se retiraron del catálogo.
 const PLANES_INICIALES: Omit<Plan, never>[] = [
-  // ── Solo Newsletter ──────────────────────────────────────────────────────
-  {
-    nombre: 'Solo Newsletter Mensual',
-    itemId: 'NL01',
-    monto: 19.90,
-    frecuencia: 'mensual',
-    categoria: 'newsletter',
-    descripcion: 'Recibe el boletín diario con las noticias más importantes directamente en tu correo.',
-    activo: true,
-  },
-  {
-    nombre: 'Solo Newsletter Trimestral',
-    itemId: 'NL03',
-    monto: 108,
-    frecuencia: 'trimestral',
-    categoria: 'newsletter',
-    descripcion: 'Boletín diario por 3 meses. Ahorra frente al plan mensual.',
-    activo: true,
-  },
-  {
-    nombre: 'Solo Newsletter Anual',
-    itemId: 'NL12',
-    monto: 192,
-    frecuencia: 'anual',
-    categoria: 'newsletter',
-    descripcion: 'Boletín diario por un año completo. La mejor relación precio-valor para el newsletter.',
-    activo: true,
-  },
-
   // ── ePaper + Newsletter ──────────────────────────────────────────────────
   {
     nombre: 'ePaper + Newsletter Mensual',
@@ -72,15 +46,6 @@ const PLANES_INICIALES: Omit<Plan, never>[] = [
     frecuencia: 'trimestral',
     categoria: 'impreso',
     descripcion: 'Periódico físico + ePaper + newsletter por 3 meses.',
-    activo: true,
-  },
-  {
-    nombre: 'Impreso + ePaper + Newsletter Semestral',
-    itemId: 'IMP06',
-    monto: 1365,
-    frecuencia: 'semestral',
-    categoria: 'impreso',
-    descripcion: 'Periódico físico + ePaper + newsletter por 6 meses.',
     activo: true,
   },
   {

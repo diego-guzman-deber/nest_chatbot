@@ -276,7 +276,7 @@ export class WhatsappService {
         );
       }
 
-      // 2. Generar el orderId de suscripción: wa-{contactId}-{YYYYMM}
+      // 2. Generar el orderId de suscripción: wa-{contactId}-{YYYYMM}-{timestamp}
       const orderId = this.paymentService.generarOrderId(contactId);
 
       // 3. Tomar una "foto" del contacto ANTES de generar el QR: cSubscribed
@@ -404,8 +404,12 @@ export class WhatsappService {
   ): Promise<void> {
     // Evitar generar un segundo QR y un segundo monitoreo para la misma orden
     // (mismo contacto + mismo mes) si el usuario confirma la compra dos veces.
-    if (this.ordenesEnMonitoreo.has(orderId)) {
-      this.logger.warn(`[${waId}] Ya existe un monitoreo activo para la orden ${orderId}. Se ignora el nuevo intento de generar QR.`);
+    // El orderId ahora es único por intento, así que la comparación es por
+    // contacto: mientras haya un QR de este contacto en monitoreo no se genera otro.
+    const prefijoContacto = this.paymentService.prefijoOrdenContacto(orderId);
+    const ordenPendiente = [...this.ordenesEnMonitoreo].some((o) => o.startsWith(prefijoContacto));
+    if (ordenPendiente) {
+      this.logger.warn(`[${waId}] Ya existe un monitoreo activo para el contacto (${prefijoContacto}). Se ignora el nuevo intento de generar QR (${orderId}).`);
       await this.sendMessage(
         waId,
         'Ya tienes un código QR pendiente de pago para esta suscripción. Por favor usa ese mismo código; si no lo encuentras, dime y te lo reenvío.',
