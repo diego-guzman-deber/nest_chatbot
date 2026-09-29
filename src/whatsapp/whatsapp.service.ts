@@ -266,6 +266,30 @@ export class WhatsappService {
       const itemId = planResuelto.itemId;
       const frecuencia = planResuelto.frecuencia ?? 'mensual';
 
+      // 0. Avisar al usuario si el correo ya tiene cuenta registrada en El Deber
+      // (EspoCRM = la misma cuenta que usa epaper.eldeber.com.bo para loguear),
+      // o si se le va a crear una nueva — antes de cobrar, no después en silencio.
+      try {
+        const cuentaExistente = await this.espoContactService.buscarContactoPorEmail(email);
+        if (cuentaExistente) {
+          await this.sendMessage(
+            waId,
+            `Encontramos que ya tienes una cuenta registrada en El Deber con el correo ${email}. Vamos a activar este plan directamente sobre tu cuenta existente.`,
+          );
+        } else {
+          await this.sendMessage(
+            waId,
+            `No encontramos una cuenta registrada con el correo ${email}, así que crearemos una nueva para ti. Cuando se confirme el pago, te enviaremos tus credenciales de acceso por correo.`,
+          );
+        }
+      } catch (err: any) {
+        // No es bloqueante: si falla la verificación, seguimos con el flujo normal
+        // (obtenerOCrearContacto más abajo hace su propia búsqueda igualmente).
+        this.logger.warn(
+          `[${waId}] No se pudo verificar si ${email} ya tiene cuenta antes de generar el QR: ${err.message}`,
+        );
+      }
+
       // 1. Obtener o crear el contacto en EspoCRM para obtener el contactId correcto
       let contactId = waId;
       try {
