@@ -274,12 +274,12 @@ export class WhatsappService {
         if (cuentaExistente) {
           await this.sendMessage(
             waId,
-            `Encontramos que ya tienes una cuenta registrada en El Deber con el correo ${email}. Vamos a activar este plan directamente sobre tu cuenta existente, la misma con la que ingresas en https://epaper.eldeber.com.bo/`,
+            `Encontramos que ya tienes una cuenta registrada en El Deber con el correo ${email}. Vamos a activar este plan directamente sobre tu cuenta existente, la misma con la que ingresas en https://suscripciones.eldeber.com.bo/login`,
           );
         } else {
           await this.sendMessage(
             waId,
-            `No encontramos una cuenta registrada con el correo ${email}, así que crearemos una nueva para ti. Cuando se confirme el pago, te enviaremos tus credenciales de acceso por correo para que ingreses en https://epaper.eldeber.com.bo/`,
+            `No encontramos una cuenta registrada con el correo ${email}, así que crearemos una nueva para ti. Cuando se confirme el pago, te enviaremos tus credenciales de acceso por correo para que ingreses en https://suscripciones.eldeber.com.bo/login`,
           );
         }
       } catch (err: any) {
